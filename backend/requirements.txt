@@ -8,3 +8,4 @@ alembic
 pgvector
 boto3
 botocore[crt]
+httpx

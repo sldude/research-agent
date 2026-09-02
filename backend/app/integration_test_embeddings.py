@@ -12,7 +12,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from app.database_connect import SessionLocal
-from app.database_tables import DocumentChunkTable, PapersTable
+from app.database_tables import CorpusTable, DocumentChunkTable, DocumentTable
 from app.embeddings import DIMENSIONS, MODEL_ID, embed_text
 
 
@@ -27,7 +27,12 @@ def run_embedding_integration_test() -> None:
 
     with SessionLocal() as session:
         try:
-            paper = PapersTable(
+            corpus = CorpusTable(
+                name=f"Embedding integration test {external_id}",
+                corpus_type="user_upload",
+                owner_id="integration-test-user",
+            )
+            document = DocumentTable(
                 external_id=external_id,
                 source="integration-test",
                 title="Embedding Integration Test",
@@ -38,8 +43,9 @@ def run_embedding_integration_test() -> None:
                 embedding=embedding,
                 embedding_model=MODEL_ID,
             )
-            paper.chunks.append(chunk)
-            session.add(paper)
+            document.chunks.append(chunk)
+            corpus.documents.append(document)
+            session.add(corpus)
 
             # Send the inserts to PostgreSQL without committing them.
             session.flush()
