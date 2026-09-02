@@ -2,6 +2,7 @@ from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, Integer, String, Text, func, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 
 # define base template table class
 class BaseTable(DeclarativeBase):
@@ -60,6 +61,15 @@ class DocumentChunkTable(BaseTable):
     content: Mapped[str] = mapped_column(
         Text,
         nullable = False,
+    )
+    # per-chunk embedding
+    embedding: Mapped[list[float] | None] = mapped_column(
+    Vector(1024),
+    nullable=True,
+    )
+    embedding_model: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable = True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone = True),

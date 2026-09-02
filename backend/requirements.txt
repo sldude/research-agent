@@ -4,3 +4,7 @@ sqlalchemy
 psycopg[binary]
 pydantic
 python-dotenv
+alembic
+pgvector
+boto3
+botocore[crt]
