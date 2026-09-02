@@ -1,5 +1,6 @@
 import json
 import os
+from functools import lru_cache
 
 import boto3
 from dotenv import load_dotenv
@@ -16,16 +17,15 @@ DIMENSIONS = int(
     os.getenv("BEDROCK_EMBEDDING_DIMENSIONS", "1024")
 )
 
-# creates bedrock
+@lru_cache(maxsize=1)
 def create_bedrock_client():
+    """Create one reusable Bedrock client only when an embedding is requested."""
+
     session = boto3.Session(
         profile_name=AWS_PROFILE,
         region_name=AWS_REGION,
     )
     return session.client("bedrock-runtime")
-
-
-bedrock = create_bedrock_client()
 
 
 def embed_text(text: str) -> list[float]:
@@ -34,7 +34,7 @@ def embed_text(text: str) -> list[float]:
     if not cleaned_text:
         raise ValueError("Cannot embed empty text")
 
-    response = bedrock.invoke_model(
+    response = create_bedrock_client().invoke_model(
         modelId=MODEL_ID,
         contentType="application/json",
         accept="application/json",
