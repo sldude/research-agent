@@ -1,37 +1,42 @@
 import os
 
-from sqlalchemy import create_engine
 from dotenv import load_dotenv
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
+from sqlalchemy.orm import sessionmaker
 
 
 # Load environment variables from .env
 load_dotenv()
 
-# Construct the SQLAlchemy connection string to supabase DB
+# Build the URL from separate values so passwords containing characters such as
+# @, :, or / do not need to be URL-encoded.
 DATABASE_URL = URL.create(
-    drivername="postgresql+psycopg", # uses psycopg3
-    username=os.getenv("user"),
-    password=os.getenv("password"),
-    host=os.getenv("host"),
-    port=int(os.getenv("port")),
-    database=os.getenv("dbname"),
+    drivername="postgresql+psycopg",
+    username=os.environ["DB_USER"],
+    password=os.environ["DB_PASSWORD"],
+    host=os.environ["DB_HOST"],
+    port=int(os.getenv("DB_PORT", "5432")),
+    database=os.environ["DB_NAME"],
     query={"sslmode": "require"},
 )
-# Create the SQLAlchemy engine
-engine = create_engine(DATABASE_URL)
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 # Instantiate SessionLocal session factory, creates sessions
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
-    bind=engine
+    bind=engine,
 )
 
-# Test the connection
-try:
+
+def test_connection() -> None:
+    """Open a connection and run a lightweight query."""
     with engine.connect() as connection:
-        print("Connection successful!")
-except Exception as e:
-    print(f"Failed to connect: {e}")
+        connection.execute(text("SELECT 1"))
+
+
+if __name__ == "__main__":
+    test_connection()
+    print("Connection successful!")
