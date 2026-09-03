@@ -69,3 +69,21 @@ class RagAnswer(BaseModel):
     question: str
     answer: str
     sources: list[RagSource] = Field(default_factory=list)
+
+
+class CorpusResponse(BaseModel):
+    """A corpus that a client can select for retrieval."""
+
+    id: int
+    name: str
+    corpus_type: str
+    owner_id: str | None
+
+
+class RagQuestionRequest(BaseModel):
+    """Input accepted by the RAG answer endpoint."""
+
+    corpus_id: int = Field(gt=0)
+    question: str = Field(min_length=1, max_length=2_000)
+    limit: int = Field(default=5, ge=1, le=20)
+    max_tokens: int = Field(default=500, ge=1, le=2_000)
