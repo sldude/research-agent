@@ -2,9 +2,9 @@
 
 from sqlalchemy.orm import Session
 
-from app.api_schemas import RagAnswer, RagSource, RetrievedChunk
-from app.generation import generate_text
-from app.vector_retrieval import retrieve_similar_chunks
+from app.clients.generation import generate_text
+from app.schemas.api_schemas import RagAnswer, RagSource, RetrievedChunk
+from app.services.vector_retrieval import retrieve_similar_chunks
 
 
 # These stable behavioral instructions are sent separately from the user's

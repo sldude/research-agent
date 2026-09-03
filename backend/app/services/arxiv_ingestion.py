@@ -8,9 +8,9 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api_schemas import ArxivPaper
-from app.database_tables import CorpusTable, DocumentChunkTable, DocumentTable
-from app.embeddings import DIMENSIONS, MODEL_ID, embed_text
+from app.clients.embeddings import DIMENSIONS, MODEL_ID, embed_text
+from app.database.database_tables import CorpusTable, DocumentChunkTable, DocumentTable
+from app.schemas.api_schemas import ArxivPaper
 
 
 # Accepting an embedding function as an argument makes this service testable

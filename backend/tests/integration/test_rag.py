@@ -1,7 +1,7 @@
 """Read-only integration test for the complete RAG pipeline.
 
 Run from the backend directory:
-    python -m app.integration_test_rag
+    python -m tests.integration.test_rag
 
 The test makes one Titan embedding call, one PostgreSQL retrieval query, and
 one Nova generation call. It does not modify the database.
@@ -12,9 +12,9 @@ import re
 
 from sqlalchemy import select
 
-from app.database_connect import SessionLocal
-from app.database_tables import CorpusTable
-from app.rag_service import answer_question
+from app.database.database_connect import SessionLocal
+from app.database.database_tables import CorpusTable
+from app.services.rag_service import answer_question
 
 
 def run_rag_integration_test(

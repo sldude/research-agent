@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from app.api_schemas import ArxivPaper
+from app.schemas.api_schemas import ArxivPaper
 
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"

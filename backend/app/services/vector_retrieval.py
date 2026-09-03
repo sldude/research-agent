@@ -3,9 +3,9 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api_schemas import RetrievedChunk
-from app.database_tables import DocumentChunkTable, DocumentTable
-from app.embeddings import MODEL_ID, embed_text
+from app.clients.embeddings import MODEL_ID, embed_text
+from app.database.database_tables import DocumentChunkTable, DocumentTable
+from app.schemas.api_schemas import RetrievedChunk
 
 
 def retrieve_similar_chunks(

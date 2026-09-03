@@ -68,7 +68,7 @@ def generate_text(
         },
     }
 
-    # Bedrock's system field is optional. Later, rag_service.py will use it for
+    # Bedrock's system field is optional. The RAG service uses it for
     # stable grounding and citation instructions that are separate from data.
     if system_prompt and system_prompt.strip():
         request["system"] = [{"text": system_prompt.strip()}]

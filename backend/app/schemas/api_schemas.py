@@ -1,7 +1,7 @@
 """Pydantic schemas used at the API and external-service boundaries.
 
 These classes validate Python data. They do not create database tables; the
-SQLAlchemy models in ``database_tables.py`` are responsible for persistence.
+SQLAlchemy models in ``app.database.database_tables`` are responsible for persistence.
 """
 
 from datetime import date

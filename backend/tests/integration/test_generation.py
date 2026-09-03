@@ -1,13 +1,13 @@
 """Opt-in smoke test for Nova text generation through Bedrock.
 
 Run from the backend directory:
-    python -m app.integration_test_generation
+    python -m tests.integration.test_generation
 
 The test makes one short, paid Bedrock generation call. It does not connect to
 PostgreSQL and does not modify any data.
 """
 
-from app.generation import GENERATION_MODEL_ID, generate_text
+from app.clients.generation import GENERATION_MODEL_ID, generate_text
 
 
 def run_generation_integration_test() -> None:

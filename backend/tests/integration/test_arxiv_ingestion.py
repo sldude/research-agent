@@ -1,16 +1,16 @@
 """Live arXiv + Bedrock + PostgreSQL test that always rolls back its inserts.
 
 Run from the backend directory after applying migrations:
-    python -m app.integration_test_arxiv_ingestion
+    python -m tests.integration.test_arxiv_ingestion
 """
 
 from sqlalchemy import func, select
 
-from app.arxiv_api_client import ArxivClient
-from app.arxiv_ingestion import ingest_arxiv_papers
-from app.database_connect import SessionLocal
-from app.database_tables import DocumentChunkTable, DocumentTable
-from app.embeddings import DIMENSIONS
+from app.clients.arxiv_api_client import ArxivClient
+from app.clients.embeddings import DIMENSIONS
+from app.database.database_connect import SessionLocal
+from app.database.database_tables import DocumentChunkTable, DocumentTable
+from app.services.arxiv_ingestion import ingest_arxiv_papers
 
 
 def run_arxiv_ingestion_integration_test() -> None:
@@ -59,6 +59,13 @@ def run_arxiv_ingestion_integration_test() -> None:
             print(f"Inserted paper: {saved_document.title}")
             print(f"Document ID: {saved_document.id}")
             print(f"Embedding dimensions: {DIMENSIONS}")
+            print("\nIngestion statistics:")
+            print(f"Retrieved: {len(papers)}")
+            print(f"Processed: {stats.processed}")
+            print(f"Created: {stats.created}")
+            print(f"Updated: {stats.updated}")
+            print(f"Unchanged: {stats.unchanged}")
+            print(f"Bedrock calls: {stats.bedrock_calls}")
             print("arXiv ingestion integration test passed.")
         finally:
             # This test proves inserts work while leaving no sample data behind.

@@ -1,7 +1,7 @@
 """Read-only integration test for Titan and pgvector retrieval.
 
 Run from the backend directory:
-    python -m app.integration_test_vector_retrieval
+    python -m tests.integration.test_vector_retrieval
 
 This makes one Bedrock embedding call but does not modify the database.
 """
@@ -10,9 +10,9 @@ import argparse
 
 from sqlalchemy import select
 
-from app.database_connect import SessionLocal
-from app.database_tables import CorpusTable
-from app.vector_retrieval import retrieve_similar_chunks
+from app.database.database_connect import SessionLocal
+from app.database.database_tables import CorpusTable
+from app.services.vector_retrieval import retrieve_similar_chunks
 
 
 def run_vector_retrieval_test(
