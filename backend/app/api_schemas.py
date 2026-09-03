@@ -52,3 +52,20 @@ class RetrievedChunk(BaseModel):
     content: str
     source_url: str | None
     distance: float
+
+class RagSource(BaseModel):
+    """One database-backed source supplied to the generation model to answer post similarity retrieval."""
+
+    number: int
+    document_id: int
+    external_id: str | None
+    title: str
+    source_url: str | None
+    distance: float
+
+class RagAnswer(BaseModel):
+    """A generated answer with the sources supplied to the model."""
+
+    question: str
+    answer: str
+    sources: list[RagSource] = Field(default_factory=list)
