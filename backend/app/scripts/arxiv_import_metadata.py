@@ -4,9 +4,9 @@ and related metadata ingested from API into database tables
 
 import argparse
 
-from app.arxiv_api_client import ArxivClient
-from app.arxiv_ingestion import ingest_arxiv_papers
-from app.database_connect import SessionLocal
+from app.clients.arxiv_api_client import ArxivClient
+from app.database.database_connect import SessionLocal
+from app.services.arxiv_ingestion import ingest_arxiv_papers
 
 
 def import_arxiv_metadata(max_results: int = 5) -> None:

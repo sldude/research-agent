@@ -1,7 +1,7 @@
 """Opt-in integration test for Titan embeddings and PostgreSQL pgvector.
 
 Run from the backend directory with:
-    python -m app.integration_test_embeddings
+    python -m tests.integration.test_embeddings
 
 The test invokes Amazon Bedrock once and rolls back its database transaction,
 so it does not leave test records in the database.
@@ -11,9 +11,9 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app.database_connect import SessionLocal
-from app.database_tables import CorpusTable, DocumentChunkTable, DocumentTable
-from app.embeddings import DIMENSIONS, MODEL_ID, embed_text
+from app.clients.embeddings import DIMENSIONS, MODEL_ID, embed_text
+from app.database.database_connect import SessionLocal
+from app.database.database_tables import CorpusTable, DocumentChunkTable, DocumentTable
 
 
 def run_embedding_integration_test() -> None:
