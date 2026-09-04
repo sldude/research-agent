@@ -1,8 +1,7 @@
 """Coordinate vector retrieval and grounded answer generation."""
 
-from sqlalchemy.orm import Session
-
 from app.clients.generation import generate_text
+from app.database.repository import DynamoRepository
 from app.schemas.api_schemas import RagAnswer, RagSource, RetrievedChunk
 from app.services.vector_retrieval import retrieve_similar_chunks
 
@@ -100,12 +99,12 @@ the sentences they support.
 
 
 def answer_question(
-    session: Session,
     *,
-    corpus_id: int,
+    corpus_id: str,
     question: str,
     limit: int = 5,
     max_tokens: int = 500,
+    repository: DynamoRepository | None = None,
 ) -> RagAnswer:
     """Retrieve relevant chunks and ask Bedrock for a grounded answer."""
 
@@ -114,10 +113,10 @@ def answer_question(
         raise ValueError("question cannot be empty")
 
     chunks = retrieve_similar_chunks(
-        session,
         corpus_id=corpus_id,
         query=cleaned_question,
         limit=limit,
+        repository=repository,
     )
     sources = create_rag_sources(chunks)
 

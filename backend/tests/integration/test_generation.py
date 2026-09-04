@@ -4,7 +4,7 @@ Run from the backend directory:
     python -m tests.integration.test_generation
 
 The test makes one short, paid Bedrock generation call. It does not connect to
-PostgreSQL and does not modify any data.
+DynamoDB and does not modify any data.
 """
 
 from app.clients.generation import GENERATION_MODEL_ID, generate_text

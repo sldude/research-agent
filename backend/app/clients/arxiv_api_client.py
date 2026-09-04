@@ -1,6 +1,6 @@
 """Small client for retrieving paper metadata from arXiv's Atom API.
 
-This module intentionally does not write to PostgreSQL or call Bedrock. Its
+This module intentionally does not write to DynamoDB or call Bedrock. Its
 only responsibility is to request metadata and convert XML entries into
 validated ``ArxivPaper`` objects.
 """
@@ -255,7 +255,7 @@ class ArxivClient:
 
     @staticmethod
     def _parse_date(value: str | None) -> date | None:
-        """Convert an ISO-8601 timestamp into a date for DocumentTable."""
+        """Convert an ISO-8601 timestamp into a date for storage."""
 
         if value is None:
             return None

@@ -1,4 +1,4 @@
-"""Read-only integration test for Titan and pgvector retrieval.
+"""Read-only integration test for Titan and DynamoDB vector retrieval.
 
 Run from the backend directory:
     python -m tests.integration.test_vector_retrieval
@@ -8,10 +8,7 @@ This makes one Bedrock embedding call but does not modify the database.
 
 import argparse
 
-from sqlalchemy import select
-
-from app.database.database_connect import SessionLocal
-from app.database.database_tables import CorpusTable
+from app.database.repository import DynamoRepository
 from app.services.vector_retrieval import retrieve_similar_chunks
 
 
@@ -23,25 +20,23 @@ def run_vector_retrieval_test(
 ) -> None:
     """Find a stored corpus and print its nearest abstract chunks."""
 
-    with SessionLocal() as session:
-        corpus = session.scalar(
-            select(CorpusTable)
-            .where(CorpusTable.name == corpus_name)
-            .order_by(CorpusTable.id)
-            .limit(1)
+    repository = DynamoRepository()
+    corpus = repository.find_corpus(
+        name=corpus_name,
+        corpus_type="research_abstract",
+        owner_id=None,
+    )
+    if corpus is None:
+        raise AssertionError(
+            f"Corpus {corpus_name!r} was not found. "
+            "Permanently import at least one arXiv paper first."
         )
-        if corpus is None:
-            raise AssertionError(
-                f"Corpus {corpus_name!r} was not found. "
-                "Permanently import at least one arXiv paper first."
-            )
-
-        results = retrieve_similar_chunks(
-            session,
-            corpus_id=corpus.id,
-            query=query,
-            limit=limit,
-        )
+    results = retrieve_similar_chunks(
+        corpus_id=corpus.id,
+        query=query,
+        limit=limit,
+        repository=repository,
+    )
 
     if not results:
         raise AssertionError(
@@ -68,7 +63,7 @@ def run_vector_retrieval_test(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Search a stored arXiv corpus using pgvector.",
+        description="Search a stored arXiv corpus using DynamoDB vector search.",
     )
     parser.add_argument(
         "--query",
