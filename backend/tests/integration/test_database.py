@@ -1,4 +1,4 @@
-"""Verify that the configured PostgreSQL database is reachable.
+"""Verify that the configured DynamoDB tables are reachable.
 
 Run from ``backend`` with::
 
@@ -9,7 +9,7 @@ from app.database.database_connect import test_connection
 
 
 def run_database_connection_test() -> None:
-    """Execute a harmless SELECT statement against the configured database."""
+    """Describe both configured DynamoDB tables."""
     test_connection()
     print("Database connection integration test passed.")
 

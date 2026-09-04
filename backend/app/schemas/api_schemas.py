@@ -1,7 +1,7 @@
 """Pydantic schemas used at the API and external-service boundaries.
 
-These classes validate Python data. They do not create database tables; the
-SQLAlchemy models in ``app.database.database_tables`` are responsible for persistence.
+These classes validate Python data. They do not create DynamoDB tables or
+indexes; the provisioning script is responsible for infrastructure.
 """
 
 from datetime import date
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 class ArxivPaper(BaseModel):
     """A normalized paper returned by the arXiv Atom API.
 
-    Keeping this model independent from ``DocumentTable`` lets us inspect or
+    Keeping this model independent from stored document records lets us inspect or
     display search results before deciding which papers should be saved.
     """
 
@@ -45,8 +45,8 @@ class ArxivSearchResponse(BaseModel):
 
 # schema for chunk similarity ranking retrieval
 class RetrievedChunk(BaseModel):
-    chunk_id: int
-    document_id: int
+    chunk_id: str
+    document_id: str
     external_id: str | None
     title: str
     content: str
@@ -57,7 +57,7 @@ class RagSource(BaseModel):
     """One database-backed source supplied to the generation model to answer post similarity retrieval."""
 
     number: int
-    document_id: int
+    document_id: str
     external_id: str | None
     title: str
     source_url: str | None
@@ -74,7 +74,7 @@ class RagAnswer(BaseModel):
 class CorpusResponse(BaseModel):
     """A corpus that a client can select for retrieval."""
 
-    id: int
+    id: str
     name: str
     corpus_type: str
     owner_id: str | None
@@ -83,7 +83,7 @@ class CorpusResponse(BaseModel):
 class RagQuestionRequest(BaseModel):
     """Input accepted by the RAG answer endpoint."""
 
-    corpus_id: int = Field(gt=0)
+    corpus_id: str = Field(min_length=1, max_length=100)
     question: str = Field(min_length=1, max_length=2_000)
     limit: int = Field(default=5, ge=1, le=20)
     max_tokens: int = Field(default=500, ge=1, le=2_000)

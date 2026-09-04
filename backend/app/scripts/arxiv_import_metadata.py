@@ -5,7 +5,6 @@ and related metadata ingested from API into database tables
 import argparse
 
 from app.clients.arxiv_api_client import ArxivClient
-from app.database.database_connect import SessionLocal
 from app.services.arxiv_ingestion import ingest_arxiv_papers
 
 
@@ -42,29 +41,22 @@ def import_arxiv_metadata(max_results: int = 5) -> None:
         print("Nothing was saved.")
         return
 
-    with SessionLocal() as session:
-        try:
-            stats = ingest_arxiv_papers(
-                session,
-                papers,
-                corpus_name="My arXiv research corpus",
-                owner_id=None,
-            )
-            session.commit()
+    stats = ingest_arxiv_papers(
+        papers,
+        corpus_name="My arXiv research corpus",
+        owner_id=None,
+    )
 
-            print("\nProcessed papers:")
-            for result in stats.results:
-                print(f"- [{result.status}] {result.document.title}")
+    print("\nProcessed papers:")
+    for result in stats.results:
+        print(f"- [{result.status}] {result.document.title}")
 
-            print("\nIngestion summary:")
-            print(f"Processed: {stats.processed}")
-            print(f"Created: {stats.created}")
-            print(f"Updated: {stats.updated}")
-            print(f"Unchanged: {stats.unchanged}")
-            print(f"Bedrock calls: {stats.bedrock_calls}")
-        except Exception:
-            session.rollback()
-            raise
+    print("\nIngestion summary:")
+    print(f"Processed: {stats.processed}")
+    print(f"Created: {stats.created}")
+    print(f"Updated: {stats.updated}")
+    print(f"Unchanged: {stats.unchanged}")
+    print(f"Bedrock calls: {stats.bedrock_calls}")
 
 
 if __name__ == "__main__":

@@ -1,84 +1,21 @@
-"""Opt-in integration test for Titan embeddings and PostgreSQL pgvector.
+"""Live integration test for Amazon Titan embeddings.
 
-Run from the backend directory with:
+Run from the backend directory:
     python -m tests.integration.test_embeddings
-
-The test invokes Amazon Bedrock once and rolls back its database transaction,
-so it does not leave test records in the database.
 """
 
-from uuid import uuid4
-
-from sqlalchemy import select
-
-from app.clients.embeddings import DIMENSIONS, MODEL_ID, embed_text
-from app.database.database_connect import SessionLocal
-from app.database.database_tables import CorpusTable, DocumentChunkTable, DocumentTable
+from app.clients.embeddings import DIMENSIONS, embed_text
 
 
 def run_embedding_integration_test() -> None:
-    content = "Retrieval-augmented generation for scientific literature."
-
     print("Generating an embedding with Amazon Bedrock...")
-    embedding = embed_text(content)
+    embedding = embed_text(
+        "Retrieval-augmented generation for scientific literature."
+    )
     assert len(embedding) == DIMENSIONS
-
-    external_id = f"integration-test-{uuid4()}"
-
-    with SessionLocal() as session:
-        try:
-            corpus = CorpusTable(
-                name=f"Embedding integration test {external_id}",
-                corpus_type="user_upload",
-                owner_id="integration-test-user",
-            )
-            document = DocumentTable(
-                external_id=external_id,
-                source="integration-test",
-                title="Embedding Integration Test",
-            )
-            chunk = DocumentChunkTable(
-                chunk_index=0,
-                content=content,
-                embedding=embedding,
-                embedding_model=MODEL_ID,
-            )
-            document.chunks.append(chunk)
-            corpus.documents.append(document)
-            session.add(corpus)
-
-            # Send the inserts to PostgreSQL without committing them.
-            session.flush()
-            chunk_id = chunk.id
-
-            # Clear ORM-cached values so this retrieval reads from PostgreSQL.
-            session.expire_all()
-            saved_chunk = session.scalar(
-                select(DocumentChunkTable).where(
-                    DocumentChunkTable.id == chunk_id
-                )
-            )
-
-            assert saved_chunk is not None
-            assert saved_chunk.embedding is not None
-            assert len(saved_chunk.embedding) == DIMENSIONS
-            assert saved_chunk.embedding_model == MODEL_ID
-
-            cosine_distance = session.scalar(
-                select(
-                    DocumentChunkTable.embedding.cosine_distance(embedding)
-                ).where(DocumentChunkTable.id == chunk_id)
-            )
-
-            assert cosine_distance is not None
-            assert abs(float(cosine_distance)) < 1e-5
-
-            print(f"Stored and retrieved a {DIMENSIONS}-dimension vector.")
-            print(f"Cosine distance from the original: {cosine_distance}")
-            print("Embedding integration test passed.")
-        finally:
-            # Remove all changes made by this test, even if an assertion fails.
-            session.rollback()
+    assert all(isinstance(value, (int, float)) for value in embedding)
+    print(f"Titan returned a {DIMENSIONS}-dimension vector.")
+    print("Embedding integration test passed.")
 
 
 if __name__ == "__main__":

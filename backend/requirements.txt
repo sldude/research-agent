@@ -1,11 +1,7 @@
 fastapi
 uvicorn[standard]
-sqlalchemy
-psycopg[binary]
 pydantic
 python-dotenv
-alembic
-pgvector
-boto3
-botocore[crt]
+boto3>=1.43.64
+botocore[crt]>=1.43.64
 httpx

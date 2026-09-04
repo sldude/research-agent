@@ -1,42 +1,37 @@
+"""Create reusable DynamoDB clients from environment configuration."""
+
 import os
+from functools import lru_cache
+from typing import Any
 
+import boto3
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL
-from sqlalchemy.orm import sessionmaker
 
-
-# Load environment variables from .env
 load_dotenv()
 
-# Build the URL from separate values so passwords containing characters such as
-# @, :, or / do not need to be URL-encoded.
-DATABASE_URL = URL.create(
-    drivername="postgresql+psycopg",
-    username=os.environ["DB_USER"],
-    password=os.environ["DB_PASSWORD"],
-    host=os.environ["DB_HOST"],
-    port=int(os.getenv("DB_PORT", "5432")),
-    database=os.environ["DB_NAME"],
-    query={"sslmode": "require"},
-)
+AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
+AWS_PROFILE = os.getenv("AWS_PROFILE")
+DYNAMODB_CORPORA_TABLE = os.getenv("DYNAMODB_CORPORA_TABLE", "research-agent-corpora")
+DYNAMODB_CHUNKS_TABLE = os.getenv("DYNAMODB_CHUNKS_TABLE", "research-agent-chunks")
+DYNAMODB_VECTOR_INDEX = os.getenv("DYNAMODB_VECTOR_INDEX", "embedding-index")
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
-# Instantiate SessionLocal session factory, creates sessions
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-)
+@lru_cache(maxsize=1)
+def create_dynamodb_client() -> Any:
+    """Return one low-level DynamoDB client for the current process."""
+
+    session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
+    return session.client("dynamodb")
 
 
 def test_connection() -> None:
-    """Open a connection and run a lightweight query."""
-    with engine.connect() as connection:
-        connection.execute(text("SELECT 1"))
+    """Confirm that both configured DynamoDB tables can be described."""
+
+    client = create_dynamodb_client()
+    client.describe_table(TableName=DYNAMODB_CORPORA_TABLE)
+    client.describe_table(TableName=DYNAMODB_CHUNKS_TABLE)
 
 
 if __name__ == "__main__":
     test_connection()
-    print("Connection successful!")
+    print("DynamoDB connection successful!")

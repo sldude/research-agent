@@ -3,17 +3,14 @@
 Run from the backend directory:
     python -m tests.integration.test_rag
 
-The test makes one Titan embedding call, one PostgreSQL retrieval query, and
+The test makes one Titan embedding call, one DynamoDB vector search, and
 one Nova generation call. It does not modify the database.
 """
 
 import argparse
 import re
 
-from sqlalchemy import select
-
-from app.database.database_connect import SessionLocal
-from app.database.database_tables import CorpusTable
+from app.database.repository import DynamoRepository
 from app.services.rag_service import answer_question
 
 
@@ -26,26 +23,24 @@ def run_rag_integration_test(
 ) -> None:
     """Find a corpus, generate a grounded answer, and validate its sources."""
 
-    with SessionLocal() as session:
-        corpus = session.scalar(
-            select(CorpusTable)
-            .where(CorpusTable.name == corpus_name)
-            .order_by(CorpusTable.id)
-            .limit(1)
+    repository = DynamoRepository()
+    corpus = repository.find_corpus(
+        name=corpus_name,
+        corpus_type="research_abstract",
+        owner_id=None,
+    )
+    if corpus is None:
+        raise AssertionError(
+            f"Corpus {corpus_name!r} was not found. "
+            "Permanently import at least one arXiv paper first."
         )
-        if corpus is None:
-            raise AssertionError(
-                f"Corpus {corpus_name!r} was not found. "
-                "Permanently import at least one arXiv paper first."
-            )
-
-        result = answer_question(
-            session,
-            corpus_id=corpus.id,
-            question=question,
-            limit=limit,
-            max_tokens=max_tokens,
-        )
+    result = answer_question(
+        corpus_id=corpus.id,
+        question=question,
+        limit=limit,
+        max_tokens=max_tokens,
+        repository=repository,
+    )
 
     assert result.answer.strip(), "The generation model returned an empty answer."
     assert result.sources, "No embedded sources were retrieved from the corpus."
