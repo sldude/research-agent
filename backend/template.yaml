@@ -36,6 +36,11 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: $default
+      # Limit sustained traffic and short spikes before requests reach Lambda.
+      # Requests over these limits receive HTTP 429 responses.
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 1
+        ThrottlingBurstLimit: 5
 
   ResearchAgentFunction:
     Type: AWS::Serverless::Function
