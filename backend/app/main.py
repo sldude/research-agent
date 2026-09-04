@@ -1,6 +1,7 @@
 """FastAPI entry point for the research-agent backend."""
 
 from fastapi import FastAPI, HTTPException, status
+from mangum import Mangum
 
 from app.database.repository import DynamoRepository
 from app.schemas.api_schemas import CorpusResponse, RagAnswer, RagQuestionRequest
@@ -54,3 +55,8 @@ def generate_rag_answer(request: RagQuestionRequest) -> RagAnswer:
         max_tokens=request.max_tokens,
         repository=repository,
     )
+
+
+# API Gateway sends an event to Lambda rather than an ordinary ASGI request.
+# Mangum translates that event into the ASGI format expected by FastAPI.
+handler = Mangum(app, lifespan="off")

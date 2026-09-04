@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless API for the research-agent application
+
+Parameters:
+  CorporaTableName:
+    Type: String
+    Default: research-agent-corpora
+  ChunksTableName:
+    Type: String
+    Default: research-agent-chunks
+  VectorIndexName:
+    Type: String
+    Default: embedding-index
+  EmbeddingModelId:
+    Type: String
+    Default: amazon.titan-embed-text-v2:0
+  EmbeddingDimensions:
+    Type: Number
+    Default: 1024
+  GenerationModelId:
+    Type: String
+    Default: us.amazon.nova-2-lite-v1:0
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    MemorySize: 1024
+    Timeout: 60
+    Tracing: Active
+
+Resources:
+  ResearchAgentHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+
+  ResearchAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: research-agent-api
+      CodeUri: .
+      Handler: app.main.handler
+      Environment:
+        Variables:
+          DYNAMODB_CORPORA_TABLE: !Ref CorporaTableName
+          DYNAMODB_CHUNKS_TABLE: !Ref ChunksTableName
+          DYNAMODB_VECTOR_INDEX: !Ref VectorIndexName
+          BEDROCK_EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          BEDROCK_EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
+          BEDROCK_GENERATION_MODEL_ID: !Ref GenerationModelId
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            - Sid: ReadResearchAgentTables
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:BatchGetItem
+                - dynamodb:SearchVectors
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CorporaTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChunksTableName}
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChunksTableName}/index/*
+            - Sid: InvokeResearchModels
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0
+                - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-2-lite-v1:0
+                - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.amazon.nova-2-lite-v1:0
+      Events:
+        RootRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ResearchAgentHttpApi
+            Path: /
+            Method: ANY
+        ProxyRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ResearchAgentHttpApi
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  ApiUrl:
+    Description: Public base URL for the research-agent HTTP API
+    Value: !Sub https://${ResearchAgentHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref ResearchAgentFunction
