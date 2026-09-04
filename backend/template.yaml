@@ -32,6 +32,29 @@ Globals:
     Tracing: Active
 
 Resources:
+  ResearchAgentUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: research-agent-users
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+
+  ResearchAgentUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: research-agent-web
+      UserPoolId: !Ref ResearchAgentUserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
   ResearchAgentHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -41,6 +64,16 @@ Resources:
       DefaultRouteSettings:
         ThrottlingRateLimit: 1
         ThrottlingBurstLimit: 5
+      # API Gateway validates Cognito JWTs before protected requests reach Lambda.
+      Auth:
+        DefaultAuthorizer: CognitoJwtAuthorizer
+        Authorizers:
+          CognitoJwtAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${ResearchAgentUserPool}
+              audience:
+                - !Ref ResearchAgentUserPoolClient
 
   ResearchAgentFunction:
     Type: AWS::Serverless::Function
@@ -79,6 +112,14 @@ Resources:
                 - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-2-lite-v1:0
                 - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.amazon.nova-2-lite-v1:0
       Events:
+        HealthRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ResearchAgentHttpApi
+            Path: /health
+            Method: GET
+            Auth:
+              Authorizer: NONE
         RootRoute:
           Type: HttpApi
           Properties:
@@ -99,3 +140,9 @@ Outputs:
   FunctionName:
     Description: Lambda function name
     Value: !Ref ResearchAgentFunction
+  UserPoolId:
+    Description: Cognito user pool used to authenticate API users
+    Value: !Ref ResearchAgentUserPool
+  UserPoolClientId:
+    Description: Cognito application client ID used by the frontend
+    Value: !Ref ResearchAgentUserPoolClient
