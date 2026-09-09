@@ -21,6 +21,9 @@ Parameters:
   GenerationModelId:
     Type: String
     Default: us.amazon.nova-2-lite-v1:0
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:5173
 
 Globals:
   Function:
@@ -64,6 +67,17 @@ Resources:
       DefaultRouteSettings:
         ThrottlingRateLimit: 1
         ThrottlingBurstLimit: 5
+      # Permit the browser-based frontend to call this API from its own origin.
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref FrontendOrigin
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
       # API Gateway validates Cognito JWTs before protected requests reach Lambda.
       Auth:
         DefaultAuthorizer: CognitoJwtAuthorizer
