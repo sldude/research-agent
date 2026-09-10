@@ -30,6 +30,8 @@
 }
 
 .api-status button,
+.auth-card button,
+.corpora-card button,
 .question-form button {
   padding: 10px 20px;
   border: 0;
@@ -62,9 +64,85 @@
 }
 
 .api-status button:disabled,
+.auth-card button:disabled,
+.corpora-card button:disabled,
 .question-form button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.auth-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.sign-in-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sign-in-form label {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.sign-in-form input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+}
+
+.sign-in-form button {
+  justify-self: start;
+  margin-top: 6px;
+}
+
+.signed-in-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.auth-message {
+  margin-top: 12px;
+}
+
+.corpora-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.corpora-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.corpora-card ul {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.corpora-card li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .submitted-question {

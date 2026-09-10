@@ -24,6 +24,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual({"status": "ok"}, response.json())
 
+    def test_cors_preflight(self) -> None:
+        response = self.client.options("/api/corpora")
+        self.assertEqual(204, response.status_code)
+
     @patch("app.main.DynamoRepository")
     def test_list_corpora(self, repository_class: Mock) -> None:
         repository_class.return_value.list_corpora.return_value = [

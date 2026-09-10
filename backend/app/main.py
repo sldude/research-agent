@@ -1,6 +1,6 @@
 """FastAPI entry point for the research-agent backend."""
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from mangum import Mangum
 
 from app.database.repository import DynamoRepository
@@ -44,6 +44,13 @@ def health_check() -> dict[str, str]:
     """Confirm that the API process is running without calling AWS."""
 
     return {"status": "ok"}
+
+
+@app.options("/{path:path}", include_in_schema=False)
+def cors_preflight(path: str) -> Response:
+    """Accept API Gateway's unauthenticated browser CORS preflight request."""
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/api/corpora", response_model=list[CorpusResponse])
