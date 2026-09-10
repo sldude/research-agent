@@ -134,6 +134,16 @@ Resources:
             Method: GET
             Auth:
               Authorizer: NONE
+        # Browser CORS preflight requests do not include a Cognito token.
+        # Keep OPTIONS public; the actual API requests remain authenticated.
+        OptionsRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ResearchAgentHttpApi
+            Path: /{proxy+}
+            Method: OPTIONS
+            Auth:
+              Authorizer: NONE
         RootRoute:
           Type: HttpApi
           Properties:
