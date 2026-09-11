@@ -24,6 +24,9 @@ Parameters:
   FrontendOrigin:
     Type: String
     Default: http://localhost:5173
+  ProductionFrontendOrigin:
+    Type: String
+    Default: https://research-agent-iota.vercel.app
 
 Globals:
   Function:
@@ -71,6 +74,7 @@ Resources:
       CorsConfiguration:
         AllowOrigins:
           - !Ref FrontendOrigin
+          - !Ref ProductionFrontendOrigin
         AllowHeaders:
           - Authorization
           - Content-Type
