@@ -1,5 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { fetchAuthSession, getCurrentUser, signIn, signOut } from 'aws-amplify/auth'
+import {
+  confirmResetPassword,
+  confirmSignUp,
+  fetchAuthSession,
+  getCurrentUser,
+  resendSignUpCode,
+  resetPassword,
+  signIn,
+  signOut,
+  signUp,
+} from 'aws-amplify/auth'
 import './App.css'
 
 type Corpus = {
@@ -24,12 +34,23 @@ type RagAnswer = {
   sources: RagSource[]
 }
 
+type AuthMode =
+  | 'signIn'
+  | 'signUp'
+  | 'confirmSignUp'
+  | 'resetPassword'
+  | 'confirmResetPassword'
+
 function App() {
   const [question, setQuestion] = useState('')
   const [apiStatus, setApiStatus] = useState('Not checked')
   const [isCheckingApi, setIsCheckingApi] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmationCode, setConfirmationCode] = useState('')
+  const [authMode, setAuthMode] = useState<AuthMode>('signIn')
   const [signedInUser, setSignedInUser] = useState<string | null>(null)
   const [authMessage, setAuthMessage] = useState('Checking sign-in status...')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
@@ -50,6 +71,15 @@ function App() {
       .catch(() => setAuthMessage('Not signed in'))
   }, [])
 
+  function showAuthMode(mode: AuthMode, message: string) {
+    setAuthMode(mode)
+    setAuthMessage(message)
+    setPassword('')
+    setConfirmPassword('')
+    setNewPassword('')
+    setConfirmationCode('')
+  }
+
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsAuthenticating(true)
@@ -58,6 +88,14 @@ function App() {
     try {
       const result = await signIn({ username: email, password })
       if (!result.isSignedIn) {
+        if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+          showAuthMode(
+            'confirmSignUp',
+            'Your email is not confirmed. Enter the verification code sent to your email.',
+          )
+          return
+        }
+
         setAuthMessage(`Additional step required: ${result.nextStep.signInStep}`)
         return
       }
@@ -67,7 +105,125 @@ function App() {
       setPassword('')
       setAuthMessage('Signed in')
     } catch (error) {
+      if (error instanceof Error && error.name === 'UserNotConfirmedException') {
+        showAuthMode(
+          'confirmSignUp',
+          'Your email is not confirmed. Enter the verification code sent to your email.',
+        )
+        return
+      }
+
       setAuthMessage(error instanceof Error ? error.message : 'Sign-in failed')
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
+
+  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (password !== confirmPassword) {
+      setAuthMessage('Passwords do not match.')
+      return
+    }
+
+    setIsAuthenticating(true)
+    setAuthMessage('Creating account...')
+
+    try {
+      const result = await signUp({
+        username: email,
+        password,
+        options: { userAttributes: { email } },
+      })
+      setPassword('')
+      setConfirmPassword('')
+      if (result.isSignUpComplete) {
+        setAuthMode('signIn')
+        setAuthMessage('Account created. Sign in to continue.')
+      } else {
+        setAuthMode('confirmSignUp')
+        setAuthMessage('Enter the confirmation code sent to your email.')
+      }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Sign-up failed')
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
+
+  async function handleConfirmSignUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setIsAuthenticating(true)
+    setAuthMessage('Confirming account...')
+
+    try {
+      await confirmSignUp({ username: email, confirmationCode })
+      setConfirmationCode('')
+      setAuthMode('signIn')
+      setAuthMessage('Email confirmed. Sign in to continue.')
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Confirmation failed')
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
+
+  async function handleResendSignUpCode() {
+    if (!email) {
+      setAuthMessage('Enter the email address for the account.')
+      return
+    }
+
+    setIsAuthenticating(true)
+    setAuthMessage('Sending a new confirmation code...')
+    try {
+      await resendSignUpCode({ username: email })
+      setAuthMessage('A new confirmation code was sent to your email.')
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Could not resend code')
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
+
+  async function handleResetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setIsAuthenticating(true)
+    setAuthMessage('Requesting reset code...')
+
+    try {
+      const result = await resetPassword({ username: email })
+      if (result.nextStep.resetPasswordStep === 'CONFIRM_RESET_PASSWORD_WITH_CODE') {
+        setAuthMode('confirmResetPassword')
+        setAuthMessage('Enter the reset code sent to your email.')
+      } else {
+        setAuthMode('signIn')
+        setAuthMessage('Password reset is complete. Sign in to continue.')
+      }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Reset request failed')
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
+
+  async function handleConfirmResetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setIsAuthenticating(true)
+    setAuthMessage('Updating password...')
+
+    try {
+      await confirmResetPassword({
+        username: email,
+        confirmationCode,
+        newPassword,
+      })
+      setConfirmationCode('')
+      setNewPassword('')
+      setAuthMode('signIn')
+      setAuthMessage('Password updated. Sign in to continue.')
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : 'Password reset failed')
     } finally {
       setIsAuthenticating(false)
     }
@@ -212,7 +368,7 @@ function App() {
               Sign out
             </button>
           </div>
-        ) : (
+        ) : authMode === 'signIn' ? (
           <form className="sign-in-form" onSubmit={handleSignIn}>
             <label htmlFor="email">Email</label>
             <input
@@ -234,6 +390,149 @@ function App() {
             />
             <button type="submit" disabled={isAuthenticating}>
               {isAuthenticating ? 'Signing in...' : 'Sign in'}
+            </button>
+            <div className="auth-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => showAuthMode('signUp', 'Create a new account.')}
+              >
+                Create account
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() =>
+                  showAuthMode('resetPassword', 'Enter your account email.')
+                }
+              >
+                Forgot password?
+              </button>
+            </div>
+          </form>
+        ) : authMode === 'signUp' ? (
+          <form className="sign-in-form" onSubmit={handleSignUp}>
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+            <label htmlFor="confirm-password">Confirm password</label>
+            <input
+              id="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              required
+            />
+            <button type="submit" disabled={isAuthenticating}>
+              {isAuthenticating ? 'Creating...' : 'Create account'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => showAuthMode('signIn', 'Sign in to your account.')}
+            >
+              Back to sign in
+            </button>
+          </form>
+        ) : authMode === 'confirmSignUp' ? (
+          <form className="sign-in-form" onSubmit={handleConfirmSignUp}>
+            <p>Confirming {email}</p>
+            <label htmlFor="confirmation-code">Confirmation code</label>
+            <input
+              id="confirmation-code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={confirmationCode}
+              onChange={(event) => setConfirmationCode(event.target.value)}
+              required
+            />
+            <button type="submit" disabled={isAuthenticating}>
+              {isAuthenticating ? 'Confirming...' : 'Confirm email'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleResendSignUpCode}
+              disabled={isAuthenticating}
+            >
+              Resend code
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => showAuthMode('signIn', 'Sign in to your account.')}
+            >
+              Back to sign in
+            </button>
+          </form>
+        ) : authMode === 'resetPassword' ? (
+          <form className="sign-in-form" onSubmit={handleResetPassword}>
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+            <button type="submit" disabled={isAuthenticating}>
+              {isAuthenticating ? 'Sending...' : 'Send reset code'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => showAuthMode('signIn', 'Sign in to your account.')}
+            >
+              Back to sign in
+            </button>
+          </form>
+        ) : (
+          <form className="sign-in-form" onSubmit={handleConfirmResetPassword}>
+            <p>Resetting password for {email}</p>
+            <label htmlFor="confirmation-code">Reset code</label>
+            <input
+              id="confirmation-code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={confirmationCode}
+              onChange={(event) => setConfirmationCode(event.target.value)}
+              required
+            />
+            <label htmlFor="new-password">New password</label>
+            <input
+              id="new-password"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              required
+            />
+            <button type="submit" disabled={isAuthenticating}>
+              {isAuthenticating ? 'Updating...' : 'Set new password'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => showAuthMode('signIn', 'Sign in to your account.')}
+            >
+              Back to sign in
             </button>
           </form>
         )}

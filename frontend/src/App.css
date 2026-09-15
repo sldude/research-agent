@@ -105,6 +105,18 @@
   margin-top: 6px;
 }
 
+.auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auth-card .secondary-button {
+  padding-inline: 0;
+  background: transparent;
+  color: var(--accent);
+}
+
 .signed-in-row {
   display: flex;
   align-items: center;
