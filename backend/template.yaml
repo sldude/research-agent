@@ -48,6 +48,11 @@ Resources:
         - email
       AutoVerifiedAttributes:
         - email
+      # Password-reset codes are delivered only to a user's verified email.
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
 
   ResearchAgentUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
