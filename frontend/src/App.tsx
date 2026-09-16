@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type SubmitEvent} from 'react'
 import {
   confirmResetPassword,
   confirmSignUp,
@@ -61,6 +61,10 @@ function App() {
   const [ragAnswer, setRagAnswer] = useState<RagAnswer | null>(null)
   const [ragMessage, setRagMessage] = useState('')
   const [isAsking, setIsAsking] = useState(false)
+  const [newCorpusName, setNewCorpusName] = useState('')
+  const [documentFile, setDocumentFile] = useState<File | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState('')
 
   useEffect(() => {
     getCurrentUser()
@@ -80,7 +84,7 @@ function App() {
     setConfirmationCode('')
   }
 
-  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
+  async function handleSignIn(event: SubmitEvent <HTMLFormElement>) {
     event.preventDefault()
     setIsAuthenticating(true)
     setAuthMessage('Signing in...')
@@ -119,7 +123,7 @@ function App() {
     }
   }
 
-  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
+  async function handleSignUp(event: SubmitEvent <HTMLFormElement>) {
     event.preventDefault()
     if (password !== confirmPassword) {
       setAuthMessage('Passwords do not match.')
@@ -151,7 +155,7 @@ function App() {
     }
   }
 
-  async function handleConfirmSignUp(event: FormEvent<HTMLFormElement>) {
+  async function handleConfirmSignUp(event: SubmitEvent <HTMLFormElement>) {
     event.preventDefault()
     setIsAuthenticating(true)
     setAuthMessage('Confirming account...')
@@ -186,7 +190,7 @@ function App() {
     }
   }
 
-  async function handleResetPassword(event: FormEvent<HTMLFormElement>) {
+  async function handleResetPassword(event: SubmitEvent <HTMLFormElement>) {
     event.preventDefault()
     setIsAuthenticating(true)
     setAuthMessage('Requesting reset code...')
@@ -207,7 +211,7 @@ function App() {
     }
   }
 
-  async function handleConfirmResetPassword(event: FormEvent<HTMLFormElement>) {
+  async function handleConfirmResetPassword(event: SubmitEvent <HTMLFormElement>) {
     event.preventDefault()
     setIsAuthenticating(true)
     setAuthMessage('Updating password...')
@@ -299,7 +303,7 @@ function App() {
     }
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: SubmitEvent <HTMLFormElement>) {
     event.preventDefault()
     const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
     if (!apiUrl || !selectedCorpusId || !question.trim()) {
@@ -341,6 +345,108 @@ function App() {
       setRagMessage(error instanceof Error ? error.message : 'Request failed')
     } finally {
       setIsAsking(false)
+    }
+  }
+
+  async function handleCreateAndUpload(
+    event: SubmitEvent <HTMLFormElement>,
+  ) {
+    event.preventDefault()
+
+    const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
+    const name = newCorpusName.trim()
+    const file = documentFile
+
+    if (!apiUrl || !name || !file) {
+      setUploadMessage('Configure the API, enter a name, and choose a file.')
+      return
+    }
+
+    if (file.size === 0 || file.size > 3 * 1024 * 1024) {
+      setUploadMessage('Choose a nonempty file no larger than 3 MiB.')
+      return
+    }
+
+    setIsUploading(true)
+    setUploadMessage('Creating corpus...')
+
+    // Gives useful messages for HTTP errors, including validation errors.
+    async function checkResponse(response: Response) {
+      if (response.ok) return
+
+      const body = await response.json().catch(() => null)
+      throw new Error(
+        typeof body?.detail === 'string'
+          ? body.detail
+          : `Request failed (${response.status})`,
+      )
+    }
+
+    let createdCorpus: Corpus | null = null
+
+    try {
+      const session = await fetchAuthSession()
+      const accessToken = session.tokens?.accessToken.toString()
+
+      if (!accessToken) {
+        throw new Error('Sign in before uploading.')
+      }
+
+      const createResponse = await fetch(`${apiUrl}/api/corpora`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name }),
+      })
+
+      await checkResponse(createResponse)
+      const corpus: Corpus = await createResponse.json()
+      createdCorpus = corpus
+
+      // Add or update this corpus in the existing selector.
+      setCorpora((current) => [
+        ...current.filter((item) => item.id !== corpus.id),
+        corpus,
+      ])
+      setSelectedCorpusId(corpus.id)
+      setRagAnswer(null)
+      setRagMessage('')
+
+      setUploadMessage(`Uploading ${file.name}...`)
+
+      const form = new FormData()
+      form.append('file', file)
+
+      const uploadResponse = await fetch(
+        `${apiUrl}/api/corpora/${encodeURIComponent(corpus.id)}/documents`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: form,
+        },
+      )
+
+      await checkResponse(uploadResponse)
+
+      setUploadMessage(
+        `${file.name} uploaded to "${corpus.name}". ` +
+        'Document processing is needed before it can answer questions.',
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Request failed.'
+
+      setUploadMessage(
+        createdCorpus
+          ? `Corpus "${createdCorpus.name}" exists, but upload failed: ${message}`
+          : message,
+      )
+    } finally {
+      setIsUploading(false)
     }
   }
 
@@ -561,6 +667,46 @@ function App() {
             </ul>
           )}
         </section>
+      )}
+
+      {signedInUser && (
+        <form className="question-form" onSubmit={handleCreateAndUpload}>
+          <h2>Create a document corpus</h2>
+
+          <label htmlFor="new-corpus-name">Corpus name</label>
+          <input
+            id="new-corpus-name"
+            value={newCorpusName}
+            onChange={(event) => setNewCorpusName(event.target.value)}
+            placeholder="My research documents"
+            maxLength={100}
+            disabled={isUploading}
+            required
+          />
+
+          <label htmlFor="document-file">Document</label>
+          <input
+            id="document-file"
+            type="file"
+            accept=".pdf,.txt,.md"
+            onChange={(event) =>
+              setDocumentFile(event.target.files?.[0] ?? null)
+            }
+            disabled={isUploading}
+            required
+          />
+
+          <p>PDF, TXT, or Markdown. Maximum 3 MiB per file.</p>
+
+          <button
+            type="submit"
+            disabled={isUploading || !newCorpusName.trim() || !documentFile}
+          >
+            {isUploading ? 'Uploading...' : 'Create corpus and upload'}
+          </button>
+
+          <p role="status">{uploadMessage}</p>
+        </form>
       )}
 
       {signedInUser && (

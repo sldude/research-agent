@@ -4,7 +4,7 @@ DynamoDB does not require ORM table classes or schema migrations. These
 dataclasses provide typed records for the service and API layers.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 
@@ -34,3 +34,5 @@ class DocumentRecord:
     embedding_model: str | None
     embedding_dimensions: int | None
     created_at: datetime
+    categories: list[str] = field(default_factory=list)
+    updated_date: date | None = None

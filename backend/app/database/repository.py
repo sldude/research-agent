@@ -2,6 +2,8 @@
 
 from datetime import date, datetime, timezone
 from typing import Any
+import random
+import time
 from uuid import NAMESPACE_URL, uuid5
 
 from botocore.exceptions import ClientError
@@ -60,6 +62,11 @@ def _document_from_item(item: dict[str, Any]) -> DocumentRecord:
             else None
         ),
         created_at=datetime.fromisoformat(item["created_at"]["S"]),
+        categories=[value["S"] for value in item.get("categories", {}).get("L", [])],
+        updated_date=(
+            date.fromisoformat(item["updated_date"]["S"])
+            if "updated_date" in item else None
+        ),
     )
 
 
@@ -68,6 +75,42 @@ class DynamoRepository:
 
     def __init__(self, client: Any | None = None) -> None:
         self.client = client or create_dynamodb_client()
+
+    def get_documents(self, *, corpus_id: str, source: str, external_ids: list[str]) -> dict[str, DocumentRecord]:
+        """Read up to 100 distinct documents without transferring embeddings.
+
+        Exhausted partial-response retries must fail, never classify unread keys
+        as missing (which would cause unnecessary embedding charges).
+        """
+        external_ids = list(dict.fromkeys(external_ids))
+        if len(external_ids) > 100:
+            raise ValueError("Batch lookup supports at most 100 distinct IDs")
+        if not external_ids:
+            return {}
+        fields = ("corpus_id chunk_id document_id source external_id title abstract authors "
+                  "publication_date source_url license_url content embedding_model "
+                  "embedding_dimensions created_at categories updated_date").split()
+        names = {f"#f{i}": field for i, field in enumerate(fields)}
+        request = {DYNAMODB_CHUNKS_TABLE: {
+            "Keys": [{"corpus_id": _string(corpus_id),
+                      "chunk_id": _string(self.chunk_id(self.document_id(source, value)))}
+                     for value in external_ids],
+            "ConsistentRead": True,
+            "ProjectionExpression": ", ".join(names),
+            "ExpressionAttributeNames": names,
+        }}
+        documents = {}
+        for attempt in range(8):
+            response = self.client.batch_get_item(RequestItems=request)
+            for item in response.get("Responses", {}).get(DYNAMODB_CHUNKS_TABLE, []):
+                document = _document_from_item(item)
+                documents[document.external_id] = document
+            request = response.get("UnprocessedKeys", {})
+            if not any(value.get("Keys") for value in request.values()):
+                return documents
+            if attempt < 7:
+                time.sleep(random.uniform(0, min(0.1 * 2 ** attempt, 5)))
+        raise RuntimeError("DynamoDB left batch lookup keys unprocessed after 8 attempts; retry preparation")
 
     def list_corpora(self) -> list[CorpusRecord]:
         items: list[dict[str, Any]] = []
@@ -216,6 +259,8 @@ class DynamoRepository:
         embedding: list[float],
         embedding_model: str,
         created_at: datetime | None = None,
+        categories: list[str] | None = None,
+        updated_date: date | None = None,
     ) -> DocumentRecord:
         document_id = self.document_id(source, external_id)
         chunk_id = self.chunk_id(document_id)
@@ -228,6 +273,7 @@ class DynamoRepository:
             "external_id": _string(external_id),
             "title": _string(title),
             "authors": {"L": [_string(author) for author in authors]},
+            "categories": {"L": [_string(value) for value in (categories or [])]},
             "content": _string(content),
             "embedding": {"L": [_number(value) for value in embedding]},
             "embedding_model": _string(embedding_model),
@@ -239,6 +285,7 @@ class DynamoRepository:
             "publication_date": publication_date.isoformat() if publication_date else None,
             "source_url": source_url,
             "license_url": license_url,
+            "updated_date": updated_date.isoformat() if updated_date else None,
         }
         for name, value in optional_values.items():
             if value is not None:

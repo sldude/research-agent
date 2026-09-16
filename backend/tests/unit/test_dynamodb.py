@@ -56,6 +56,8 @@ class DynamoRepositoryTests(unittest.TestCase):
             content="Example\n\nExample abstract",
             embedding=[0.1, 0.2],
             embedding_model="test-model",
+            categories=["cs.AI", "cs.IR"],
+            updated_date=date(2026, 2, 1),
         )
         ranked = repository.search_documents(
             corpus_id="corpus-1",
@@ -64,6 +66,8 @@ class DynamoRepositoryTests(unittest.TestCase):
             limit=1,
         )
         self.assertEqual(saved, ranked[0][0])
+        self.assertEqual(saved.categories, ["cs.AI", "cs.IR"])
+        self.assertEqual(saved.updated_date, date(2026, 2, 1))
         self.assertEqual(0.125, ranked[0][1])
 
     def test_create_table_requests_match_current_sdk_model(self) -> None:

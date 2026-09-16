@@ -87,6 +87,8 @@ def save_arxiv_paper(
             existing.publication_date != paper.publication_date,
             existing.source_url != paper.source_url,
             existing.license_url != paper.license_url,
+            existing.categories != paper.categories,
+            existing.updated_date != paper.updated_date,
         )
     )
 
@@ -124,6 +126,8 @@ def save_arxiv_paper(
         publication_date=paper.publication_date,
         source_url=paper.source_url,
         license_url=paper.license_url,
+        categories=paper.categories,
+        updated_date=paper.updated_date,
         content=chunk_content,
         embedding=embedding,
         embedding_model=MODEL_ID,

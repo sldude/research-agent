@@ -27,6 +27,9 @@ Parameters:
   ProductionFrontendOrigin:
     Type: String
     Default: https://research-agent-iota.vercel.app
+  DocumentUploadBucketName:
+    Type: String
+    Description: Existing private bucket for document uploads
 
 Globals:
   Function:
@@ -112,6 +115,7 @@ Resources:
           BEDROCK_EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
           BEDROCK_EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
           BEDROCK_GENERATION_MODEL_ID: !Ref GenerationModelId
+          DOCUMENT_UPLOAD_BUCKET: !Ref DocumentUploadBucketName
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
@@ -134,6 +138,18 @@ Resources:
                 - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0
                 - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-2-lite-v1:0
                 - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/us.amazon.nova-2-lite-v1:0
+            - Sid: UploadDocuments
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - !Sub arn:${AWS::Partition}:s3:::${DocumentUploadBucketName}/uploads/*
+            - Sid: CreateUserCorpora
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CorporaTableName}
       Events:
         HealthRoute:
           Type: HttpApi

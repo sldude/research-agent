@@ -87,3 +87,6 @@ class RagQuestionRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2_000)
     limit: int = Field(default=5, ge=1, le=20)
     max_tokens: int = Field(default=500, ge=1, le=2_000)
+
+class CreateCorpusRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)

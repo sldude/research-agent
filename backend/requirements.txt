@@ -6,3 +6,4 @@ python-dotenv
 boto3>=1.43.64
 botocore[crt]>=1.43.64
 httpx
+python-multipart
