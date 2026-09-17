@@ -9,6 +9,9 @@ Parameters:
   ChunksTableName:
     Type: String
     Default: research-agent-chunks
+  DocumentStatusTableName:
+    Type: String
+    Default: research-agent-document-status
   VectorIndexName:
     Type: String
     Default: embedding-index
@@ -116,6 +119,7 @@ Resources:
           BEDROCK_EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
           BEDROCK_GENERATION_MODEL_ID: !Ref GenerationModelId
           DOCUMENT_UPLOAD_BUCKET: !Ref DocumentUploadBucketName
+          DYNAMODB_DOCUMENT_STATUS_TABLE: !Ref DocumentStatusTableName
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
@@ -150,6 +154,15 @@ Resources:
                 - dynamodb:PutItem
               Resource:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CorporaTableName}
+            - Sid: ManageDocumentStatus
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DocumentStatusTableName}
       Events:
         HealthRoute:
           Type: HttpApi
@@ -183,6 +196,9 @@ Resources:
             Method: ANY
 
 Outputs:
+  DocumentStatusTableName:
+    Description: Table tracking uploaded document processing
+    Value: !Ref DocumentStatusTableName
   ApiUrl:
     Description: Public base URL for the research-agent HTTP API
     Value: !Sub https://${ResearchAgentHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}

@@ -10,6 +10,7 @@ from app.database.repository import DynamoRepository
 from app.scripts.create_dynamodb_tables import (
     chunks_table_request,
     corpora_table_request,
+    document_status_table_request,
 )
 
 
@@ -84,6 +85,7 @@ class DynamoRepositoryTests(unittest.TestCase):
         operation = client.meta.service_model.operation_model("CreateTable")
         client._serializer.serialize_to_request(corpora_table_request(), operation)
         client._serializer.serialize_to_request(chunks_table_request(), operation)
+        client._serializer.serialize_to_request(document_status_table_request(), operation)
 
 
 if __name__ == "__main__":

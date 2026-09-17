@@ -1,4 +1,5 @@
 """FastAPI entry point for the research-agent backend."""
+import logging
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -10,6 +11,7 @@ from app.database.repository import DynamoRepository
 from app.schemas.api_schemas import CorpusResponse, RagAnswer, RagQuestionRequest, CreateCorpusRequest
 from app.services.rag_service import answer_question
 
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Research Agent API",
@@ -159,11 +161,42 @@ def upload_document(
         region_name=os.getenv("AWS_REGION", "us-east-2"),
     )
     s3 = session.client("s3")
-    s3.put_object(
-        Bucket=bucket,
-        Key=object_key,
-        Body=contents,
-        ContentType="application/octet-stream",
+    # Create metadata before S3 can notify the ingestion worker.
+    repository.create_document_status(
+        corpus_id=corpus_id,
+        document_id=document_id,
+        owner_id=user_id,
+        filename=filename,
+        s3_bucket=bucket,
+        s3_key=object_key,
+    )
+
+    try:
+        s3.put_object(
+            Bucket=bucket,
+            Key=object_key,
+            Body=contents,
+            ContentType="application/octet-stream",
+        )
+    except Exception as error:
+        logger.exception("Document upload failed: %s", document_id)
+        try:
+            repository.finish_document_upload(
+                corpus_id=corpus_id,
+                document_id=document_id,
+                succeeded=False,
+            )
+        except Exception:
+            logger.exception("Could not record upload failure: %s", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Document upload failed. Please try again.",
+        ) from error
+
+    repository.finish_document_upload(
+        corpus_id=corpus_id,
+        document_id=document_id,
+        succeeded=True,
     )
 
     return {

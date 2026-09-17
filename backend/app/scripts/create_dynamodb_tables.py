@@ -1,4 +1,4 @@
-"""Provision the two on-demand DynamoDB tables used by the application.
+"""Provision the three on-demand DynamoDB tables used by the application.
 
 Running this module creates billable AWS resources. It never deletes or
 replaces an existing table.
@@ -13,6 +13,7 @@ from app.clients.embeddings import DIMENSIONS
 from app.database.database_connect import (
     DYNAMODB_CHUNKS_TABLE,
     DYNAMODB_CORPORA_TABLE,
+    DYNAMODB_DOCUMENT_STATUS_TABLE,
     DYNAMODB_VECTOR_INDEX,
     create_dynamodb_client,
 )
@@ -105,8 +106,27 @@ def chunks_table_request() -> dict[str, Any]:
     }
 
 
+def document_status_table_request() -> dict[str, Any]:
+    """Return the CreateTable request for uploaded document processing status."""
+
+    return {
+        "TableName": DYNAMODB_DOCUMENT_STATUS_TABLE,
+        "AttributeDefinitions": [
+            {"AttributeName": "corpus_id", "AttributeType": "S"},
+            {"AttributeName": "document_id", "AttributeType": "S"},
+        ],
+        "KeySchema": [
+            {"AttributeName": "corpus_id", "KeyType": "HASH"},
+            {"AttributeName": "document_id", "KeyType": "RANGE"},
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "DeletionProtectionEnabled": True,
+        "Tags": [{"Key": "Application", "Value": "research-agent"}],
+    }
+
+
 def create_dynamodb_tables() -> None:
-    """Create on-demand corpora and chunk tables if they do not exist."""
+    """Create corpus, chunk, and document-status tables if they do not exist."""
 
     client = create_dynamodb_client()
     _create_if_missing(
@@ -119,6 +139,14 @@ def create_dynamodb_tables() -> None:
         table_name=DYNAMODB_CHUNKS_TABLE,
         request=chunks_table_request(),
     )
+    _create_if_missing(
+        client,
+        table_name=DYNAMODB_DOCUMENT_STATUS_TABLE,
+        request=document_status_table_request(),
+    )
+    waiter = client.get_waiter("table_exists")
+    waiter.wait(TableName=DYNAMODB_CORPORA_TABLE)
+    waiter.wait(TableName=DYNAMODB_DOCUMENT_STATUS_TABLE)
     _wait_for_vector_index(client)
     print("DynamoDB tables and vector index are ready.")
 

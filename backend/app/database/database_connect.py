@@ -13,6 +13,9 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-2")
 AWS_PROFILE = os.getenv("AWS_PROFILE")
 DYNAMODB_CORPORA_TABLE = os.getenv("DYNAMODB_CORPORA_TABLE", "research-agent-corpora")
 DYNAMODB_CHUNKS_TABLE = os.getenv("DYNAMODB_CHUNKS_TABLE", "research-agent-chunks")
+DYNAMODB_DOCUMENT_STATUS_TABLE = os.getenv(
+    "DYNAMODB_DOCUMENT_STATUS_TABLE", "research-agent-document-status"
+)
 DYNAMODB_VECTOR_INDEX = os.getenv("DYNAMODB_VECTOR_INDEX", "embedding-index")
 
 
@@ -25,11 +28,12 @@ def create_dynamodb_client() -> Any:
 
 
 def test_connection() -> None:
-    """Confirm that both configured DynamoDB tables can be described."""
+    """Confirm that all configured DynamoDB tables can be described."""
 
     client = create_dynamodb_client()
     client.describe_table(TableName=DYNAMODB_CORPORA_TABLE)
     client.describe_table(TableName=DYNAMODB_CHUNKS_TABLE)
+    client.describe_table(TableName=DYNAMODB_DOCUMENT_STATUS_TABLE)
 
 
 if __name__ == "__main__":

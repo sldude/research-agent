@@ -13,9 +13,20 @@ pip install -r requirements.txt
 python -m app.scripts.create_dynamodb_tables
 ```
 
-Provisioning creates `research-agent-corpora`, `research-agent-chunks`, and a
-cosine vector index named `embedding-index`. Table deletion protection is
-enabled. Configure alternate names in `backend/.env` if needed.
+Provisioning creates `research-agent-corpora`, `research-agent-chunks`,
+`research-agent-document-status`, and a cosine vector index named
+`embedding-index` on the chunks table. Table deletion protection is enabled.
+Existing tables are reused. Configure alternate names in `backend/.env` if needed.
+
+The API template references these tables; the Python provisioning script creates
+them. Keep `DYNAMODB_DOCUMENT_STATUS_TABLE` in the local environment and the SAM
+`DocumentStatusTableName` parameter set to the same name. Provision tables before
+deploying the API.
+
+If you already deployed the earlier template that created `DocumentStatusTable`,
+reuse its physical table name in both settings. That earlier resource has
+`DeletionPolicy: Retain`, so removing it from the stack retains the table and its
+data. The provisioning script will skip creating it when configured with that name.
 
 ## Bulk arXiv abstract ingestion
 

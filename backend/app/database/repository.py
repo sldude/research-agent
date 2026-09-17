@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 from app.database.database_connect import (
     DYNAMODB_CHUNKS_TABLE,
     DYNAMODB_CORPORA_TABLE,
+    DYNAMODB_DOCUMENT_STATUS_TABLE,
     DYNAMODB_VECTOR_INDEX,
     create_dynamodb_client,
 )
@@ -255,6 +256,7 @@ class DynamoRepository:
         publication_date: date | None,
         source_url: str | None,
         license_url: str | None,
+        chunk_index: int = 0,
         content: str,
         embedding: list[float],
         embedding_model: str,
@@ -263,7 +265,7 @@ class DynamoRepository:
         updated_date: date | None = None,
     ) -> DocumentRecord:
         document_id = self.document_id(source, external_id)
-        chunk_id = self.chunk_id(document_id)
+        chunk_id = self.chunk_id(document_id, chunk_index)
         timestamp = created_at or datetime.now(timezone.utc)
         item: dict[str, Any] = {
             "corpus_id": _string(corpus_id),
@@ -379,3 +381,135 @@ class DynamoRepository:
             TableName=DYNAMODB_CORPORA_TABLE,
             Key={"corpus_id": _string(corpus_id)},
         )
+
+    def create_document_status(
+        self,
+        *,
+        corpus_id: str,
+        document_id: str,
+        owner_id: str,
+        filename: str,
+        s3_bucket: str,
+        s3_key: str,
+    ) -> None:
+        """Create an ``uploading`` record before writing the file to S3.
+
+        Store the owner, original filename, intended S3 location, and UTC
+        timestamps under the corpus/document key. The caller must authorize
+        the upload; this method does not check ownership or upload the file.
+        A conditional write prevents replacing an existing record and raises
+        ClientError if the key already exists or the database request fails.
+        """
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        self.client.put_item(
+            TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+            Item={
+                "corpus_id": _string(corpus_id),
+                "document_id": _string(document_id),
+                "owner_id": _string(owner_id),
+                "filename": _string(filename),
+                "s3_bucket": _string(s3_bucket),
+                "s3_key": _string(s3_key),
+                "status": _string("uploading"),
+                "created_at": _string(timestamp),
+                "updated_at": _string(timestamp),
+            },
+            ConditionExpression=(
+                "attribute_not_exists(corpus_id) "
+                "AND attribute_not_exists(document_id)"
+            ),
+        )
+
+    def get_document_status(
+        self,
+        *,
+        corpus_id: str,
+        document_id: str,
+    ) -> dict[str, Any] | None:
+        """Return upload metadata and status, or None when the record is absent.
+
+        Use a strongly consistent read and convert the initial string fields
+        from DynamoDB's wire format into a plain dictionary. Additional fields,
+        such as processing leases, are not included. The caller must enforce
+        access control before exposing the record to a user.
+        """
+
+        response = self.client.get_item(
+            TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+            Key={
+                "corpus_id": _string(corpus_id),
+                "document_id": _string(document_id),
+            },
+            ConsistentRead=True,
+        )
+
+        item = response.get("Item")
+        if item is None:
+            return None
+
+        # These initial record fields are all stored as strings.
+        return {
+            name: item[name]["S"]
+            for name in (
+                "corpus_id",
+                "document_id",
+                "owner_id",
+                "filename",
+                "s3_bucket",
+                "s3_key",
+                "status",
+                "created_at",
+                "updated_at",
+            )
+        }
+
+    def finish_document_upload(
+        self,
+        *,
+        corpus_id: str,
+        document_id: str,
+        succeeded: bool,
+    ) -> None:
+        """Record the S3 upload outcome while the status is still ``uploading``.
+
+        Set the status to ``uploaded`` on success or ``upload_failed`` on
+        failure, and refresh the UTC update timestamp. The conditional update
+        preserves any status already advanced by an ingestion worker. Missing
+        records and records in another state are left unchanged; other AWS
+        errors propagate to the caller. This does not mark ingestion complete.
+        """
+
+        try:
+            self.client.update_item(
+                TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+                Key={
+                    "corpus_id": _string(corpus_id),
+                    "document_id": _string(document_id),
+                },
+                UpdateExpression=(
+                    "SET #status = :next_status, updated_at = :now"
+                ),
+                ConditionExpression="#status = :uploading",
+                ExpressionAttributeNames={
+                    "#status": "status",
+                },
+                ExpressionAttributeValues={
+                    ":uploading": _string("uploading"),
+                    ":next_status": _string(
+                        "uploaded" if succeeded else "upload_failed"
+                    ),
+                    ":now": _string(
+                        datetime.now(timezone.utc).isoformat()
+                    ),
+                },
+            )
+        except ClientError as error:
+            if (
+                error.response["Error"]["Code"]
+                != "ConditionalCheckFailedException"
+            ):
+                raise
+            # A worker may already have advanced the status.
+            # Do not overwrite its processing or completion state.
