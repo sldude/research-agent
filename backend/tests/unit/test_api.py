@@ -197,6 +197,48 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(403, response.status_code)
 
+    @patch("app.main.DynamoRepository")
+    def test_list_documents_requires_corpus_owner(
+        self, repository_class: Mock
+    ) -> None:
+        repository = repository_class.return_value
+        path = "/api/corpora/corpus-1/documents"
+        document = {
+            "document_id": "doc-1",
+            "filename": "notes.txt",
+            "status": "ready",
+            "created_at": "2026-09-21T12:00:00+00:00",
+            "chunks_saved": 2,
+        }
+
+        repository.get_corpus.return_value = CorpusRecord(
+            id="corpus-1",
+            name="My notes",
+            corpus_type="user_upload",
+            owner_id="test-user",
+            created_at=datetime.now(timezone.utc),
+        )
+        repository.list_document_statuses.return_value = [document]
+
+        response = self.client.get(path)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([document], response.json())
+        repository.list_document_statuses.assert_called_once_with("corpus-1")
+
+        repository.list_document_statuses.reset_mock()
+        repository.get_corpus.return_value = None
+        self.assertEqual(404, self.client.get(path).status_code)
+        repository.list_document_statuses.assert_not_called()
+
+        repository.get_corpus.return_value = CorpusRecord(
+            id="corpus-1",
+            name="Someone else's notes",
+            corpus_type="user_upload",
+            owner_id="other-user",
+            created_at=datetime.now(timezone.utc),
+        )
+        self.assertEqual(404, self.client.get(path).status_code)
+        repository.list_document_statuses.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

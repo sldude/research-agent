@@ -678,3 +678,31 @@ class DynamoRepository:
                 != "ConditionalCheckFailedException"
             ):
                 raise
+
+
+    def list_document_statuses(self, corpus_id: str) -> list[dict]:
+        items = []
+        request = {
+            "TableName": DYNAMODB_DOCUMENT_STATUS_TABLE,
+            "KeyConditionExpression": "corpus_id = :corpus_id",
+            "ExpressionAttributeValues": {":corpus_id": _string(corpus_id)},
+        }
+
+        while True:
+            response = self.client.query(**request)
+            items.extend(response.get("Items", []))
+            if "LastEvaluatedKey" not in response:
+                break
+            request["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
+        return [
+            {
+                "document_id": item["document_id"]["S"],
+                "filename": item["filename"]["S"],
+                "status": item["status"]["S"],
+                "created_at": item["created_at"]["S"],
+                "chunks_saved": int(item["chunks_saved"]["N"])
+                if "chunks_saved" in item else None,
+            }
+            for item in items
+        ]

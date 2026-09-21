@@ -250,6 +250,20 @@ def create_corpus(
         owner_id=corpus.owner_id,
     )
 
+# get listed documents within corpus belonging to user
+@app.get("/api/corpora/{corpus_id}/documents")
+def list_documents(
+    corpus_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    repository = DynamoRepository()
+    corpus = repository.get_corpus(corpus_id)
+
+    if corpus is None or corpus.owner_id != user_id:
+        raise HTTPException(status_code=404, detail="Corpus not found.")
+
+    return repository.list_document_statuses(corpus_id)
+
 # API Gateway sends an event to Lambda rather than an ordinary ASGI request.
 # Mangum translates that event into the ASGI format expected by FastAPI.
 handler = Mangum(app, lifespan="off")

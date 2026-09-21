@@ -2,7 +2,7 @@
 
 import unittest
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import boto3
 
@@ -87,6 +87,41 @@ class DynamoRepositoryTests(unittest.TestCase):
         client._serializer.serialize_to_request(chunks_table_request(), operation)
         client._serializer.serialize_to_request(document_status_table_request(), operation)
 
+
+    def test_list_document_statuses_reads_all_pages(self) -> None:
+        client = Mock()
+        client.query.side_effect = [
+            {
+                "Items": [{
+                    "document_id": {"S": "doc-1"},
+                    "filename": {"S": "first.txt"},
+                    "status": {"S": "ready"},
+                    "created_at": {"S": "2026-09-21T10:00:00+00:00"},
+                    "chunks_saved": {"N": "2"},
+                }],
+                "LastEvaluatedKey": {"corpus_id": {"S": "corpus-1"},
+                                    "document_id": {"S": "doc-1"}},
+            },
+            {
+                "Items": [{
+                    "document_id": {"S": "doc-2"},
+                    "filename": {"S": "second.pdf"},
+                    "status": {"S": "processing"},
+                    "created_at": {"S": "2026-09-21T11:00:00+00:00"},
+                }],
+            },
+        ]
+
+        documents = DynamoRepository(client=client).list_document_statuses("corpus-1")
+
+        self.assertEqual(["doc-1", "doc-2"], [doc["document_id"] for doc in documents])
+        self.assertEqual(2, documents[0]["chunks_saved"])
+        self.assertIsNone(documents[1]["chunks_saved"])
+        self.assertEqual(2, client.query.call_count)
+        self.assertEqual(
+            {"corpus_id": {"S": "corpus-1"}, "document_id": {"S": "doc-1"}},
+            client.query.call_args_list[1].kwargs["ExclusiveStartKey"],
+        )
 
 if __name__ == "__main__":
     unittest.main()
