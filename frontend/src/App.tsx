@@ -19,6 +19,12 @@ type Corpus = {
   owner_id: string | null
 }
 
+type UploadTracking = {
+  corpusId: string
+  documentId: string
+  filename: string
+}
+
 type RagSource = {
   number: number
   document_id: string
@@ -65,6 +71,65 @@ function App() {
   const [documentFile, setDocumentFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
+  const [uploadTracking, setUploadTracking] = useState<UploadTracking | null>(null)
+
+  useEffect(() => {
+    if (!uploadTracking) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const startedAt = Date.now()
+    let lastStatus = 'uploaded'
+
+    async function checkStatus() {
+      if (!uploadTracking) return
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
+        if (!apiUrl) throw new Error('API URL is not configured.')
+        const session = await fetchAuthSession()
+        const token = session.tokens?.accessToken.toString()
+        if (!token) throw new Error('Sign in to check document status.')
+
+        const response = await fetch(
+          `${apiUrl}/api/corpora/${encodeURIComponent(uploadTracking.corpusId)}/documents/${encodeURIComponent(uploadTracking.documentId)}/status`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        )
+        if (!response.ok) throw new Error(`Status check failed (${response.status}).`)
+        const result: { status: string; chunks_saved: number | null } = await response.json()
+        if (cancelled) return
+        lastStatus = result.status
+
+        if (result.status === 'ready') {
+          setUploadMessage(`${uploadTracking.filename} is ready for questions (${result.chunks_saved ?? 0} chunks).`)
+          return
+        }
+        if (result.status === 'failed' || result.status === 'upload_failed') {
+          setUploadMessage(`${uploadTracking.filename} processing failed. Retrying may still occur; check the ingestion worker logs.`)
+        } else {
+          setUploadMessage(`${uploadTracking.filename} uploaded. Processing ${result.status}...`)
+        }
+      } catch (error) {
+        if (cancelled) return
+        setUploadMessage(error instanceof Error ? error.message : 'Could not check document status.')
+      }
+
+      if (Date.now() - startedAt < 5 * 60 * 1000) {
+        timer = setTimeout(checkStatus, 3000)
+      } else if (!cancelled) {
+        setUploadMessage(
+          lastStatus === 'failed' || lastStatus === 'upload_failed'
+            ? `${uploadTracking.filename} could not be processed. Check the ingestion worker logs.`
+            : `${uploadTracking.filename} is taking longer than expected. Check the ingestion worker logs.`,
+        )
+      }
+    }
+
+    void checkStatus()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [uploadTracking])
 
   useEffect(() => {
     getCurrentUser()
@@ -368,6 +433,7 @@ function App() {
     }
 
     setIsUploading(true)
+    setUploadTracking(null)
     setUploadMessage('Creating corpus...')
 
     // Gives useful messages for HTTP errors, including validation errors.
@@ -431,11 +497,13 @@ function App() {
       )
 
       await checkResponse(uploadResponse)
-
-      setUploadMessage(
-        `${file.name} uploaded to "${corpus.name}". ` +
-        'Document processing is needed before it can answer questions.',
-      )
+      const uploaded: { document_id: string } = await uploadResponse.json()
+      setUploadMessage(`${file.name} uploaded. Checking processing status...`)
+      setUploadTracking({
+        corpusId: corpus.id,
+        documentId: uploaded.document_id,
+        filename: file.name,
+      })
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Request failed.'

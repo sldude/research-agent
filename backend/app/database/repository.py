@@ -450,7 +450,7 @@ class DynamoRepository:
             return None
 
         # These initial record fields are all stored as strings.
-        return {
+        document = {
             name: item[name]["S"]
             for name in (
                 "corpus_id",
@@ -464,6 +464,9 @@ class DynamoRepository:
                 "updated_at",
             )
         }
+        if "chunks_saved" in item:
+            document["chunks_saved"] = int(item["chunks_saved"]["N"])
+        return document
 
     def finish_document_upload(
         self,
@@ -513,3 +516,165 @@ class DynamoRepository:
                 raise
             # A worker may already have advanced the status.
             # Do not overwrite its processing or completion state.
+
+    def claim_document_processing(
+        self,
+        *,
+        corpus_id: str,
+        document_id: str,
+        lease_owner: str,
+        lease_until: int,
+     ) -> str:
+        """Claim processing, returning 'claimed', 'ready', or 'busy'.
+
+        Allow a new upload, a failed attempt, or an expired processing lease.
+        Call only after validating that the S3 event matches the document.
+        A matching S3 event permits recovery from an uncertain upload failure.
+        """
+        now = int(time.time())
+        if lease_until <= now:
+            raise ValueError("The processing lease must expire in the future.")
+
+        try:
+            self.client.update_item(
+                TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+                Key={
+                    "corpus_id": _string(corpus_id),
+                    "document_id": _string(document_id),
+                },
+                UpdateExpression=(
+                    "SET #status = :processing, "
+                    "lease_owner = :owner, "
+                    "lease_until = :expires, "
+                    "updated_at = :updated"
+                ),
+                ConditionExpression=(
+                    "attribute_exists(corpus_id) AND ("
+                    "#status IN (:uploading, :uploaded, :upload_failed, :failed) "
+                    "OR (#status = :processing AND lease_until <= :now)"
+                    ")"
+                ),
+                ExpressionAttributeNames={
+                    "#status": "status",
+                },
+                ExpressionAttributeValues={
+                    ":uploading": _string("uploading"),
+                    ":uploaded": _string("uploaded"),
+                    ":upload_failed": _string("upload_failed"),
+                    ":failed": _string("failed"),
+                    ":processing": _string("processing"),
+                    ":owner": _string(lease_owner),
+                    ":expires": {"N": str(lease_until)},
+                    ":now": {"N": str(now)},
+                    ":updated": _string(datetime.now(timezone.utc).isoformat()),
+                },
+            )
+            return "claimed"
+
+        except ClientError as error:
+            if (
+                error.response["Error"]["Code"]
+                != "ConditionalCheckFailedException"
+            ):
+                raise
+            document = self.get_document_status(
+                corpus_id=corpus_id,
+                document_id=document_id,
+            )
+            if document is None:
+                raise ValueError("Document status record not found.") from error
+
+            if document["status"] == "ready":
+                return "ready"
+
+            return "busy"
+
+    def mark_document_ready(
+        self,
+        *,
+        corpus_id: str,
+        document_id: str,
+        lease_owner: str,
+        chunks_saved: int,
+    ) -> None:
+        """Mark ingestion complete while this attempt still owns the lease.
+
+        Raise ClientError if the lease expired or another attempt took over.
+        Remove the lease after all document chunks have been saved.
+        """
+        if chunks_saved < 1:
+            raise ValueError("A ready document must have at least one chunk.")
+
+        self.client.update_item(
+            TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+            Key={
+                "corpus_id": _string(corpus_id),
+                "document_id": _string(document_id),
+            },
+            UpdateExpression=(
+                "SET #status = :ready, "
+                "chunks_saved = :count, "
+                "updated_at = :updated "
+                "REMOVE lease_owner, lease_until"
+            ),
+            ConditionExpression=(
+                "#status = :processing "
+                "AND lease_owner = :owner "
+                "AND lease_until > :now"
+            ),
+            ExpressionAttributeNames={
+                "#status": "status",
+            },
+            ExpressionAttributeValues={
+                ":ready": _string("ready"),
+                ":processing": _string("processing"),
+                ":owner": _string(lease_owner),
+                ":count": {"N": str(chunks_saved)},
+                ":now": {"N": str(int(time.time()))},
+                ":updated": _string(datetime.now(timezone.utc).isoformat()),
+            },
+        )
+
+    def mark_document_failed(
+        self,
+        *,
+        corpus_id: str,
+        document_id: str,
+        lease_owner: str,
+    ) -> None:
+        """Mark this attempt failed and release its processing lease.
+
+        Leave the record unchanged if this attempt no longer owns processing.
+        Other database errors propagate. Detailed errors are logged by the
+        worker; this method stores only the failure status.
+        """
+        try:
+            self.client.update_item(
+                TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+                Key={
+                    "corpus_id": _string(corpus_id),
+                    "document_id": _string(document_id),
+                },
+                UpdateExpression=(
+                    "SET #status = :failed, updated_at = :updated "
+                    "REMOVE lease_owner, lease_until"
+                ),
+                ConditionExpression=(
+                    "#status = :processing AND lease_owner = :owner"
+                ),
+                ExpressionAttributeNames={
+                    "#status": "status",
+                },
+                ExpressionAttributeValues={
+                    ":failed": _string("failed"),
+                    ":processing": _string("processing"),
+                    ":owner": _string(lease_owner),
+                    ":updated": _string(datetime.now(timezone.utc).isoformat()),
+                },
+            )
+        except ClientError as error:
+            if (
+                error.response["Error"]["Code"]
+                != "ConditionalCheckFailedException"
+            ):
+                raise

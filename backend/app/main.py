@@ -208,6 +208,26 @@ def upload_document(
     }
 
 
+@app.get("/api/corpora/{corpus_id}/documents/{document_id}/status")
+def get_document_status(
+    corpus_id: str,
+    document_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Report ingestion progress for a document owned by the caller."""
+    document = DynamoRepository().get_document_status(
+        corpus_id=corpus_id, document_id=document_id
+    )
+    if document is None or document["owner_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    return {
+        "document_id": document_id,
+        "status": document["status"],
+        "chunks_saved": document.get("chunks_saved"),
+    }
+
+
 @app.post("/api/corpora", response_model=CorpusResponse)
 def create_corpus(
     request: CreateCorpusRequest,

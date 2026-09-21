@@ -103,6 +103,24 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(204, response.status_code)
 
     @patch("app.main.DynamoRepository")
+    def test_document_status_requires_owner(self, repository_class: Mock) -> None:
+        repository = repository_class.return_value
+        path = "/api/corpora/corpus-1/documents/doc-1/status"
+        repository.get_document_status.return_value = {
+            "owner_id": "test-user", "status": "ready", "chunks_saved": 2
+        }
+        response = self.client.get(path)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {"document_id": "doc-1", "status": "ready", "chunks_saved": 2},
+            response.json(),
+        )
+        repository.get_document_status.return_value["owner_id"] = "other-user"
+        self.assertEqual(404, self.client.get(path).status_code)
+        repository.get_document_status.return_value = None
+        self.assertEqual(404, self.client.get(path).status_code)
+
+    @patch("app.main.DynamoRepository")
     def test_list_corpora(self, repository_class: Mock) -> None:
         repository_class.return_value.list_corpora.return_value = [
             CorpusRecord(

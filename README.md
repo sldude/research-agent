@@ -28,6 +28,37 @@ reuse its physical table name in both settings. That earlier resource has
 `DeletionPolicy: Retain`, so removing it from the stack retains the table and its
 data. The provisioning script will skip creating it when configured with that name.
 
+## Uploaded document ingestion
+
+Document uploads use the separate `research-agent-document-ingestion` Lambda
+defined in `backend/template.yaml`. Before enabling its S3 notification, run
+the offline worker tests from `backend`:
+
+```bash
+python -m unittest tests.unit.test_document_worker tests.unit.test_api tests.unit.test_dynamodb
+```
+
+Provision the tables, then run `sam build --use-container` and `sam deploy --guided`.
+Keep the existing upload bucket and table parameters. In the existing upload
+bucket's S3 Properties page, create an event notification for all object-created
+events, prefix `uploads/`, no suffix, targeting `research-agent-document-ingestion`.
+The bucket and worker must be in the same region. The template grants invocation
+permission but does not configure this existing bucket's notification.
+
+Test with a new small TXT upload through the application (not directly through
+S3, because the API creates the required status record). Inspect the
+document-status table for `ready` and `chunks_saved`. The frontend checks the
+document status after upload and reports when ingestion is ready. Failed processing is
+logged under `/aws/lambda/research-agent-document-ingestion`; exhausted retries
+go to the SQS queue exposed by `DocumentIngestionFailureQueueUrl`. That queue is
+for inspection and manual replay; it does not automatically restart jobs. An
+expired processing lease likewise requires another invocation to resume.
+
+Current limitations: retries can re-embed previously written chunks, and RAG
+retrieval does not yet exclude partially ingested documents. Validate this flow
+with a test corpus before broader use. Enabling notifications does not process
+objects uploaded earlier.
+
 ## Bulk arXiv abstract ingestion
 
 For asynchronous Titan V2 embedding jobs through S3 and Bedrock, see

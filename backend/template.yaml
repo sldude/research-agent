@@ -44,6 +44,75 @@ Globals:
     Tracing: Active
 
 Resources:
+  DocumentIngestionFailures:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  DocumentIngestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: research-agent-document-ingestion
+      CodeUri: .
+      Handler: app.workers.document_ingestion_worker.handler
+      Timeout: 300
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        MaximumEventAgeInSeconds: 21600
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt DocumentIngestionFailures.Arn
+      Environment:
+        Variables:
+          DOCUMENT_UPLOAD_BUCKET: !Ref DocumentUploadBucketName
+          DYNAMODB_CORPORA_TABLE: !Ref CorporaTableName
+          DYNAMODB_CHUNKS_TABLE: !Ref ChunksTableName
+          DYNAMODB_DOCUMENT_STATUS_TABLE: !Ref DocumentStatusTableName
+          BEDROCK_EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          BEDROCK_EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            - Sid: ReadUploadedFiles
+              Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub arn:${AWS::Partition}:s3:::${DocumentUploadBucketName}/uploads/*
+            - Sid: ReadCorpus
+              Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CorporaTableName}
+            - Sid: StoreDocumentChunks
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChunksTableName}
+            - Sid: UpdateProcessingStatus
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DocumentStatusTableName}
+            - Sid: GenerateEmbeddings
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+            - Sid: SendFailedEvents
+              Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !GetAtt DocumentIngestionFailures.Arn
+
+  AllowS3ToInvokeDocumentIngestion:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DocumentIngestionFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:s3:::${DocumentUploadBucketName}
+      SourceAccount: !Ref AWS::AccountId
+
   ResearchAgentUserPool:
     Type: AWS::Cognito::UserPool
     DeletionPolicy: Retain
@@ -196,6 +265,12 @@ Resources:
             Method: ANY
 
 Outputs:
+  DocumentIngestionFunctionName:
+    Description: Worker to select for the existing bucket's uploads/ notification
+    Value: !Ref DocumentIngestionFunction
+  DocumentIngestionFailureQueueUrl:
+    Description: Failed invocation records for inspection and manual replay
+    Value: !Ref DocumentIngestionFailures
   DocumentStatusTableName:
     Description: Table tracking uploaded document processing
     Value: !Ref DocumentStatusTableName
