@@ -135,6 +135,24 @@
   border-radius: 8px;
 }
 
+.corpora-card label {
+  display: block;
+  margin: 12px 0 8px;
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.corpora-card select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-h);
+  font: inherit;
+}
+
 .corpora-heading {
   display: flex;
   align-items: center;

@@ -19,6 +19,14 @@ type Corpus = {
   owner_id: string | null
 }
 
+type UploadedDocument = {
+  document_id: string
+  filename: string
+  status: string
+  created_at: string
+  chunks_saved: number | null
+}
+
 type UploadTracking = {
   corpusId: string
   documentId: string
@@ -64,6 +72,10 @@ function App() {
   const [corporaMessage, setCorporaMessage] = useState('Not loaded')
   const [isLoadingCorpora, setIsLoadingCorpora] = useState(false)
   const [selectedCorpusId, setSelectedCorpusId] = useState('')
+  const [documentCorpusId, setDocumentCorpusId] = useState('')
+  const [documents, setDocuments] = useState<UploadedDocument[]>([])
+  const [documentsMessage, setDocumentsMessage] = useState('')
+  const [documentsRefresh, setDocumentsRefresh] = useState(0)
   const [ragAnswer, setRagAnswer] = useState<RagAnswer | null>(null)
   const [ragMessage, setRagMessage] = useState('')
   const [isAsking, setIsAsking] = useState(false)
@@ -101,6 +113,7 @@ function App() {
 
         if (result.status === 'ready') {
           setUploadMessage(`${uploadTracking.filename} is ready for questions (${result.chunks_saved ?? 0} chunks).`)
+          setDocumentsRefresh((current) => current + 1)
           return
         }
         if (result.status === 'failed' || result.status === 'upload_failed') {
@@ -139,6 +152,57 @@ function App() {
       })
       .catch(() => setAuthMessage('Not signed in'))
   }, [])
+
+  useEffect(() => {
+    if (!documentCorpusId) {
+      setDocuments([])
+      setDocumentsMessage('')
+      return
+    }
+
+    const controller = new AbortController()
+
+    async function loadDocuments() {
+      setDocuments([])
+      setDocumentsMessage('Loading documents...')
+
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
+        if (!apiUrl) throw new Error('API URL is not configured.')
+
+        const session = await fetchAuthSession()
+        const token = session.tokens?.accessToken.toString()
+        if (!token) throw new Error('Sign in to load documents.')
+
+        const response = await fetch(
+          `${apiUrl}/api/corpora/${encodeURIComponent(documentCorpusId)}/documents`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+          },
+        )
+        if (!response.ok) {
+          throw new Error(`Could not load documents (${response.status}).`)
+        }
+
+        const result: UploadedDocument[] = await response.json()
+        if (controller.signal.aborted) return
+
+        setDocuments(result)
+        setDocumentsMessage(
+          result.length === 0 ? 'No documents in this corpus yet.' : '',
+        )
+      } catch (error) {
+        if (controller.signal.aborted) return
+        setDocumentsMessage(
+          error instanceof Error ? error.message : 'Could not load documents.',
+        )
+      }
+    }
+
+    void loadDocuments()
+    return () => controller.abort()
+  }, [documentCorpusId, documentsRefresh])
 
   function showAuthMode(mode: AuthMode, message: string) {
     setAuthMode(mode)
@@ -305,6 +369,8 @@ function App() {
     setCorpora([])
     setCorporaMessage('Not loaded')
     setSelectedCorpusId('')
+    setDocumentCorpusId('')
+    setDocuments([])
     setRagAnswer(null)
     setRagMessage('')
   }
@@ -477,6 +543,7 @@ function App() {
         corpus,
       ])
       setSelectedCorpusId(corpus.id)
+      setDocumentCorpusId(corpus.id)
       setRagAnswer(null)
       setRagMessage('')
 
@@ -498,6 +565,7 @@ function App() {
 
       await checkResponse(uploadResponse)
       const uploaded: { document_id: string } = await uploadResponse.json()
+      setDocumentsRefresh((current) => current + 1)
       setUploadMessage(`${file.name} uploaded. Checking processing status...`)
       setUploadTracking({
         corpusId: corpus.id,
@@ -730,6 +798,38 @@ function App() {
                 <li key={corpus.id}>
                   <strong>{corpus.name}</strong>
                   <span>{corpus.corpus_type}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {signedInUser && (
+        <section className="corpora-card">
+          <h2>My documents</h2>
+          <label htmlFor="document-corpus">Choose a corpus</label>
+          <select
+            id="document-corpus"
+            value={documentCorpusId}
+            onChange={(event) => setDocumentCorpusId(event.target.value)}
+          >
+            <option value="">Select a corpus</option>
+            {corpora
+              .filter((corpus) => corpus.corpus_type === 'user_upload')
+              .map((corpus) => (
+                <option key={corpus.id} value={corpus.id}>
+                  {corpus.name}
+                </option>
+              ))}
+          </select>
+          <p role="status">{documentsMessage}</p>
+          {documents.length > 0 && (
+            <ul>
+              {documents.map((document) => (
+                <li key={document.document_id}>
+                  <strong>{document.filename}</strong>
+                  <span>{document.status}</span>
                 </li>
               ))}
             </ul>
