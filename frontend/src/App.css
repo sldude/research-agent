@@ -8,6 +8,33 @@
   text-align: left;
 }
 
+.workspace-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-tabs button {
+  padding: 12px 20px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.workspace-tabs button.active {
+  border-bottom-color: var(--accent);
+  color: var(--text-h);
+}
+
+.workspace-tabs button:hover,
+.workspace-tabs button:focus-visible {
+  color: var(--accent);
+}
+
 .question-form {
   display: flex;
   flex-direction: column;

@@ -55,7 +55,10 @@ type AuthMode =
   | 'resetPassword'
   | 'confirmResetPassword'
 
+type WorkspaceTab = 'ask' | 'manage'
+
 function App() {
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('ask')
   const [question, setQuestion] = useState('')
   const [apiStatus, setApiStatus] = useState('Not checked')
   const [isCheckingApi, setIsCheckingApi] = useState(false)
@@ -364,6 +367,7 @@ function App() {
 
   async function handleSignOut() {
     await signOut()
+    setActiveTab('ask')
     setSignedInUser(null)
     setAuthMessage('Not signed in')
     setCorpora([])
@@ -782,6 +786,27 @@ function App() {
       </section>
 
       {signedInUser && (
+        <nav className="workspace-tabs" aria-label="Workspace pages">
+          <button
+            type="button"
+            className={activeTab === 'ask' ? 'active' : ''}
+            aria-current={activeTab === 'ask' ? 'page' : undefined}
+            onClick={() => setActiveTab('ask')}
+          >
+            Ask
+          </button>
+          <button
+            type="button"
+            className={activeTab === 'manage' ? 'active' : ''}
+            aria-current={activeTab === 'manage' ? 'page' : undefined}
+            onClick={() => setActiveTab('manage')}
+          >
+            My corpora
+          </button>
+        </nav>
+      )}
+
+      {signedInUser && activeTab === 'ask' && (
         <section className="corpora-card">
           <div className="corpora-heading">
             <div>
@@ -805,9 +830,17 @@ function App() {
         </section>
       )}
 
-      {signedInUser && (
+      {signedInUser && activeTab === 'manage' && (
         <section className="corpora-card">
-          <h2>My documents</h2>
+          <div className="corpora-heading">
+            <div>
+              <h2>My documents</h2>
+              <p>{corporaMessage}</p>
+            </div>
+            <button type="button" onClick={loadCorpora} disabled={isLoadingCorpora}>
+              {isLoadingCorpora ? 'Loading...' : 'Load corpora'}
+            </button>
+          </div>
           <label htmlFor="document-corpus">Choose a corpus</label>
           <select
             id="document-corpus"
@@ -837,7 +870,7 @@ function App() {
         </section>
       )}
 
-      {signedInUser && (
+      {signedInUser && activeTab === 'manage' && (
         <form className="question-form" onSubmit={handleCreateAndUpload}>
           <h2>Create a document corpus</h2>
 
@@ -877,7 +910,7 @@ function App() {
         </form>
       )}
 
-      {signedInUser && (
+      {signedInUser && activeTab === 'ask' && (
         <form className="question-form" onSubmit={handleSubmit}>
           <label htmlFor="corpus">Corpus</label>
           <select
@@ -916,7 +949,7 @@ function App() {
         </form>
       )}
 
-      {ragAnswer && (
+      {signedInUser && activeTab === 'ask' && ragAnswer && (
         <section className="answer-card">
           <h2>Answer</h2>
           <p className="answer-text">{ragAnswer.answer}</p>
