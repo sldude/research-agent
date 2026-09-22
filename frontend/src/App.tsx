@@ -60,8 +60,6 @@ type WorkspaceTab = 'ask' | 'manage'
 function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('ask')
   const [question, setQuestion] = useState('')
-  const [apiStatus, setApiStatus] = useState('Not checked')
-  const [isCheckingApi, setIsCheckingApi] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -69,6 +67,7 @@ function App() {
   const [confirmationCode, setConfirmationCode] = useState('')
   const [authMode, setAuthMode] = useState<AuthMode>('signIn')
   const [signedInUser, setSignedInUser] = useState<string | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const [authMessage, setAuthMessage] = useState('Checking sign-in status...')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [corpora, setCorpora] = useState<Corpus[]>([])
@@ -152,8 +151,10 @@ function App() {
       .then((user) => {
         setSignedInUser(user.signInDetails?.loginId ?? user.username)
         setAuthMessage('Signed in')
+        void loadCorpora()
       })
       .catch(() => setAuthMessage('Not signed in'))
+      .finally(() => setAuthChecked(true))
   }, [])
 
   useEffect(() => {
@@ -240,6 +241,7 @@ function App() {
       setSignedInUser(user.signInDetails?.loginId ?? user.username)
       setPassword('')
       setAuthMessage('Signed in')
+      void loadCorpora()
     } catch (error) {
       if (error instanceof Error && error.name === 'UserNotConfirmedException') {
         showAuthMode(
@@ -414,30 +416,6 @@ function App() {
     }
   }
 
-  async function checkApiHealth() {
-    const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
-    if (!apiUrl) {
-      setApiStatus('Missing VITE_API_URL')
-      return
-    }
-
-    setIsCheckingApi(true)
-    setApiStatus('Checking...')
-    try {
-      const response = await fetch(`${apiUrl}/health`)
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
-      }
-
-      const result: { status: string } = await response.json()
-      setApiStatus(result.status)
-    } catch (error) {
-      setApiStatus(error instanceof Error ? error.message : 'Request failed')
-    } finally {
-      setIsCheckingApi(false)
-    }
-  }
-
   async function handleSubmit(event: SubmitEvent <HTMLFormElement>) {
     event.preventDefault()
     const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
@@ -590,23 +568,37 @@ function App() {
     }
   }
 
+  if (!authChecked) return <main className="auth-loading" role="status">Opening Research Agent...</main>
+
   return (
-    <main className="app">
-      <h1>Research Agent</h1>
-      <p>Ask questions grounded in scientific literature.</p>
-
-      <section className="api-status">
-        <div>
-          <h2>Backend connection</h2>
-          <p>Status: {apiStatus}</p>
+    <main className={signedInUser ? 'app workspace-layout' : 'app login-layout'}>
+      {!signedInUser && <div className="login-intro">
+        <span className="brand-mark">R<span>·</span>A</span>
+        <p className="eyebrow">YOUR RESEARCH WORKSPACE</p>
+        <h1>Research starts with a better question.</h1>
+        <p>Explore scientific literature and your own documents with answers grounded in sources you can inspect.</p>
+        <div className="intro-features">
+          <span>01 <strong>Ask across your corpora</strong></span>
+          <span>02 <strong>Bring your own documents</strong></span>
+          <span>03 <strong>Trace answers to sources</strong></span>
         </div>
-        <button type="button" onClick={checkApiHealth} disabled={isCheckingApi}>
-          {isCheckingApi ? 'Checking...' : 'Check API'}
-        </button>
-      </section>
+      </div>}
 
-      <section className="auth-card">
-        <h2>Account</h2>
+      {signedInUser && <aside className="sidebar">
+        <div className="sidebar-brand"><span className="brand-mark">R<span>·</span>A</span><strong>Research Agent</strong></div>
+        <p className="sidebar-label">WORKSPACE</p>
+        <nav className="workspace-tabs" aria-label="Workspace pages">
+          <button type="button" className={activeTab === 'ask' ? 'active' : ''} aria-current={activeTab === 'ask' ? 'page' : undefined} onClick={() => setActiveTab('ask')}>Ask</button>
+          <button type="button" className={activeTab === 'manage' ? 'active' : ''} aria-current={activeTab === 'manage' ? 'page' : undefined} onClick={() => setActiveTab('manage')}>My Corpora</button>
+        </nav>
+        <div className="sidebar-account"><span title={signedInUser}>{signedInUser}</span><button type="button" onClick={handleSignOut}>Sign out</button></div>
+      </aside>}
+
+      <div className={signedInUser ? 'workspace-content' : 'login-content'}>
+      {signedInUser && <header className="page-header"><p className="eyebrow">RESEARCH WORKSPACE</p><h1>{activeTab === 'ask' ? 'Ask' : 'My Corpora'}</h1><p>{activeTab === 'ask' ? 'Find answers grounded in your selected corpus.' : 'Organize and explore your research documents.'}</p></header>}
+      {!signedInUser && <section className="auth-card">
+        <p className="eyebrow">WELCOME TO RESEARCH AGENT</p>
+        <h2>{authMode === 'signIn' ? 'Sign in to continue' : authMode === 'signUp' ? 'Create your account' : authMode === 'resetPassword' || authMode === 'confirmResetPassword' ? 'Reset your password' : 'Confirm your email'}</h2>
         {signedInUser ? (
           <div className="signed-in-row">
             <p>Signed in as {signedInUser}</p>
@@ -783,28 +775,7 @@ function App() {
           </form>
         )}
         <p className="auth-message">{authMessage}</p>
-      </section>
-
-      {signedInUser && (
-        <nav className="workspace-tabs" aria-label="Workspace pages">
-          <button
-            type="button"
-            className={activeTab === 'ask' ? 'active' : ''}
-            aria-current={activeTab === 'ask' ? 'page' : undefined}
-            onClick={() => setActiveTab('ask')}
-          >
-            Ask
-          </button>
-          <button
-            type="button"
-            className={activeTab === 'manage' ? 'active' : ''}
-            aria-current={activeTab === 'manage' ? 'page' : undefined}
-            onClick={() => setActiveTab('manage')}
-          >
-            My corpora
-          </button>
-        </nav>
-      )}
+      </section>}
 
       {signedInUser && activeTab === 'ask' && (
         <section className="corpora-card">
@@ -971,6 +942,7 @@ function App() {
           </ol>
         </section>
       )}
+      </div>
     </main>
   )
 }

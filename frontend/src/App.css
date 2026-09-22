@@ -1,231 +1,57 @@
-.app {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: min(680px, calc(100% - 40px));
-  margin: 0 auto;
-  padding: 72px 0;
-  text-align: left;
-}
+.app { min-height: 100vh; }
+.login-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(370px, .9fr); }
+.login-intro { display: flex; flex-direction: column; justify-content: center; padding: clamp(32px, 7vw, 110px); color: #dbe6ff; background: radial-gradient(circle at 80% 20%, #3159aa 0, transparent 42%), linear-gradient(145deg, #152b57, #0c1a35); }
+.brand-mark { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 14px; background: #fff; color: #234b9d; font-size: 1.1rem; font-weight: 800; letter-spacing: -.1em; }
+.brand-mark span { color: #73a6ff; }
+.eyebrow, .sidebar-label { font-size: .72rem; font-weight: 800; letter-spacing: .16em; }
+.login-intro .eyebrow { margin-top: 54px; color: #8fb3ff; }
+.login-intro h1 { max-width: 650px; margin: 18px 0; color: white; }
+.login-intro > p:not(.eyebrow) { max-width: 510px; font-size: 1.12rem; }
+.intro-features { display: grid; gap: 14px; margin-top: 64px; }
+.intro-features span { display: flex; gap: 20px; padding-top: 14px; border-top: 1px solid #ffffff35; color: #8fb3ff; font-size: .85rem; }
+.intro-features strong { color: #eff4ff; font-size: .96rem; font-weight: 500; }
+.login-content { display: flex; align-items: center; justify-content: center; padding: 36px; background: #f8faff; }
+.auth-card { width: min(100%, 430px); padding: clamp(24px, 4vw, 42px); border: 1px solid var(--border); border-radius: 22px; background: white; box-shadow: 0 22px 70px #18356712; }
+.auth-card .eyebrow { margin-bottom: 14px; color: var(--accent); }
+.sign-in-form { display: grid; gap: 10px; margin-top: 28px; }
+.sign-in-form label, .question-form label, .corpora-card label { color: var(--text-h); font-size: .9rem; font-weight: 650; }
+.sign-in-form input, .question-form input, .question-form textarea, .question-form select, .corpora-card select { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: white; color: var(--text-h); font: inherit; }
+.sign-in-form input { margin-bottom: 8px; }
+button { font: inherit; cursor: pointer; }
+.sign-in-form button[type=submit], .question-form button, .corpora-heading button { padding: 11px 18px; border: 0; border-radius: 10px; background: var(--accent); color: white; font-weight: 650; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+.auth-actions { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.auth-card .secondary-button { justify-self: start; border: 0; background: transparent; color: var(--accent); font-size: .9rem; font-weight: 650; }
+.auth-message { margin-top: 20px; color: var(--text); font-size: .88rem; }
+.workspace-layout { display: grid; grid-template-columns: 242px minmax(0, 1fr); }
+.sidebar { position: sticky; top: 0; display: flex; flex-direction: column; height: 100vh; padding: 28px 16px; border-right: 1px solid var(--border); background: white; }
+.sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; color: var(--text-h); }
+.sidebar-brand .brand-mark { width: 38px; height: 38px; background: #e9efff; font-size: .85rem; }
+.sidebar-label { margin: 48px 12px 14px; color: #8896aa; }
+.workspace-tabs { display: grid; gap: 5px; }
+.workspace-tabs button { width: 100%; padding: 12px 14px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; font-weight: 650; }
+.workspace-tabs button.active { background: var(--accent-bg); color: #214ba8; }
+.workspace-tabs button:hover { background: #f0f4fc; }
+.sidebar-account { display: grid; gap: 8px; margin-top: auto; padding: 16px 10px 0; border-top: 1px solid var(--border); font-size: .8rem; }
+.sidebar-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-account button { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); font-weight: 650; }
+.workspace-content { display: flex; flex-direction: column; gap: 22px; width: min(100%, 1050px); padding: 48px clamp(24px, 5vw, 72px); }
+.page-header { margin-bottom: 6px; }
+.page-header .eyebrow { margin-bottom: 10px; color: var(--accent); }
+.page-header p:last-child { margin-top: 8px; }
+.corpora-card, .question-form, .answer-card { padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: white; box-shadow: 0 5px 24px #18356708; }
+.corpora-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.api-status h2 { font-size: 1rem; }
+.corpora-card ul { display: grid; gap: 10px; margin: 18px 0 0; padding: 0; list-style: none; }
+.corpora-card li { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--border); }
+.corpora-card label { display: block; margin: 18px 0 8px; }
+.question-form { display: grid; gap: 12px; }
+.question-form button { justify-self: start; }
+.question-form textarea { resize: vertical; }
+.answer-text { white-space: pre-wrap; }
+.answer-card ol { padding-left: 24px; }
+.answer-card li { margin-top: 12px; }
+.answer-card li span { display: block; font-size: .82rem; }
+@media (max-width: 760px) { .login-layout { grid-template-columns: 1fr; } .login-intro { padding: 36px 24px; } .login-intro .eyebrow { margin-top: 30px; } .intro-features { display: none; } .login-content { padding: 24px; } .workspace-layout { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; padding: 14px 20px; } .sidebar-label { display: none; } .workspace-tabs { display: flex; margin-top: 12px; } .workspace-tabs button { width: auto; } .sidebar-account { position: absolute; right: 20px; top: 15px; margin: 0; padding: 0; border: 0; max-width: 40%; } .sidebar-account span { display: none; } .workspace-content { padding: 28px 20px; } .corpora-heading { align-items: flex-start; flex-direction: column; } }
+.auth-loading { display: grid; place-items: center; min-height: 100vh; color: var(--text-h); font-weight: 650; }
 
-.workspace-tabs {
-  display: flex;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.workspace-tabs button {
-  padding: 12px 20px;
-  border: 0;
-  border-bottom: 3px solid transparent;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.workspace-tabs button.active {
-  border-bottom-color: var(--accent);
-  color: var(--text-h);
-}
-
-.workspace-tabs button:hover,
-.workspace-tabs button:focus-visible {
-  color: var(--accent);
-}
-
-.question-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.api-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.api-status h2 {
-  margin-bottom: 4px;
-}
-
-.api-status button,
-.auth-card button,
-.corpora-card button,
-.question-form button {
-  padding: 10px 20px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--accent);
-  color: white;
-  font: inherit;
-  cursor: pointer;
-}
-
-.question-form label {
-  color: var(--text-h);
-  font-weight: 600;
-}
-
-.question-form textarea,
-.question-form select {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 14px;
-  resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--text-h);
-  font: inherit;
-}
-
-.question-form button {
-  align-self: flex-start;
-}
-
-.api-status button:disabled,
-.auth-card button:disabled,
-.corpora-card button:disabled,
-.question-form button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.auth-card {
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.sign-in-form {
-  display: grid;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.sign-in-form label {
-  color: var(--text-h);
-  font-weight: 600;
-}
-
-.sign-in-form input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--text-h);
-  font: inherit;
-}
-
-.sign-in-form button {
-  justify-self: start;
-  margin-top: 6px;
-}
-
-.auth-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.auth-card .secondary-button {
-  padding-inline: 0;
-  background: transparent;
-  color: var(--accent);
-}
-
-.signed-in-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.auth-message {
-  margin-top: 12px;
-}
-
-.corpora-card {
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.corpora-card label {
-  display: block;
-  margin: 12px 0 8px;
-  color: var(--text-h);
-  font-weight: 600;
-}
-
-.corpora-card select {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--text-h);
-  font: inherit;
-}
-
-.corpora-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.corpora-card ul {
-  display: grid;
-  gap: 10px;
-  margin: 16px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.corpora-card li {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.answer-card {
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.answer-text {
-  margin-top: 12px;
-  white-space: pre-wrap;
-}
-
-.answer-card h3 {
-  margin-bottom: 8px;
-}
-
-.answer-card ol {
-  display: grid;
-  gap: 12px;
-  padding-left: 24px;
-}
-
-.answer-card li span {
-  display: block;
-  color: var(--text);
-  font-size: 0.85rem;
-}
