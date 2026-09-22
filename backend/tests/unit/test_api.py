@@ -240,5 +240,73 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(404, self.client.get(path).status_code)
         repository.list_document_statuses.assert_not_called()
 
+    @patch("app.main.boto3.Session")
+    @patch("app.main.DynamoRepository")
+    def test_document_preview_and_delete_require_owner_and_finished_status(
+        self, repository_class: Mock, session_class: Mock
+    ) -> None:
+        repository = repository_class.return_value
+        document = {
+            "corpus_id": "corpus-1", "document_id": "doc-1",
+            "owner_id": "test-user", "filename": "notes.txt",
+            "s3_bucket": "uploads", "s3_key": "uploads/user/doc-1.txt",
+            "status": "ready", "created_at": "now", "updated_at": "now",
+        }
+        repository.get_document_status.return_value = document
+        s3 = session_class.return_value.client.return_value
+        body = Mock()
+        body.read.return_value = b"preview text"
+        s3.get_object.return_value = {"Body": body}
+        path = "/api/corpora/corpus-1/documents/doc-1"
+
+        preview = self.client.get(f"{path}/content")
+        self.assertEqual(200, preview.status_code)
+        self.assertEqual("preview text", preview.text)
+        self.assertTrue(preview.headers["content-type"].startswith("text/plain"))
+
+        deleted = self.client.delete(path)
+        self.assertEqual(204, deleted.status_code)
+        s3.delete_object.assert_called_once_with(
+            Bucket="uploads", Key="uploads/user/doc-1.txt"
+        )
+        repository.delete_document.assert_called_once_with(
+            corpus_id="corpus-1", document_id="doc-1"
+        )
+
+        document["status"] = "processing"
+        self.assertEqual(409, self.client.delete(path).status_code)
+        document["owner_id"] = "another-user"
+        self.assertEqual(404, self.client.get(f"{path}/content").status_code)
+
+    @patch("app.main.boto3.Session")
+    @patch("app.main.DynamoRepository")
+    def test_delete_corpus_cascades_only_after_processing_finishes(
+        self, repository_class: Mock, session_class: Mock
+    ) -> None:
+        repository = repository_class.return_value
+        repository.get_corpus.return_value = CorpusRecord(
+            id="corpus-1", name="Notes", corpus_type="user_upload",
+            owner_id="test-user", created_at=datetime.now(timezone.utc),
+        )
+        listed = {"document_id": "doc-1", "filename": "notes.txt", "status": "ready",
+                  "created_at": "now", "chunks_saved": 1}
+        repository.list_document_statuses.return_value = [listed]
+        repository.get_document_status.return_value = {
+            **listed, "corpus_id": "corpus-1", "owner_id": "test-user",
+            "s3_bucket": "uploads", "s3_key": "uploads/user/doc-1.txt", "updated_at": "now",
+        }
+
+        response = self.client.delete("/api/corpora/corpus-1")
+        self.assertEqual(204, response.status_code)
+        session_class.return_value.client.return_value.delete_object.assert_called_once_with(
+            Bucket="uploads", Key="uploads/user/doc-1.txt"
+        )
+        repository.delete_corpus.assert_called_once_with("corpus-1")
+
+        listed["status"] = "processing"
+        repository.delete_corpus.reset_mock()
+        self.assertEqual(409, self.client.delete("/api/corpora/corpus-1").status_code)
+        repository.delete_corpus.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

@@ -123,5 +123,24 @@ class DynamoRepositoryTests(unittest.TestCase):
             client.query.call_args_list[1].kwargs["ExclusiveStartKey"],
         )
 
+    def test_delete_document_removes_all_matching_chunks_and_status(self) -> None:
+        client = Mock()
+        client.query.side_effect = [
+            {
+                "Items": [{"corpus_id": {"S": "corpus-1"}, "chunk_id": {"S": "a"}}],
+                "LastEvaluatedKey": {"corpus_id": {"S": "corpus-1"}, "chunk_id": {"S": "a"}},
+            },
+            {"Items": [{"corpus_id": {"S": "corpus-1"}, "chunk_id": {"S": "b"}}]},
+        ]
+
+        DynamoRepository(client=client).delete_document(
+            corpus_id="corpus-1", document_id="doc-1"
+        )
+
+        self.assertEqual(2, client.query.call_count)
+        requests = client.batch_write_item.call_args.kwargs["RequestItems"]
+        self.assertEqual(2, len(next(iter(requests.values()))))
+        client.delete_item.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()

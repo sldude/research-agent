@@ -353,29 +353,44 @@ class DynamoRepository:
         return ranked
 
     def delete_corpus(self, corpus_id: str) -> None:
-        """Delete one corpus and its chunks; intended for test cleanup."""
-
-        response = self.client.query(
-            TableName=DYNAMODB_CHUNKS_TABLE,
-            KeyConditionExpression="#corpus_id = :corpus_id",
-            ExpressionAttributeNames={"#corpus_id": "corpus_id"},
-            ExpressionAttributeValues={":corpus_id": _string(corpus_id)},
-            ProjectionExpression="corpus_id, chunk_id",
-        )
-        requests = [
-            {
-                "DeleteRequest": {
-                    "Key": {
-                        "corpus_id": item["corpus_id"],
-                        "chunk_id": item["chunk_id"],
+        """Delete one corpus, all indexed chunks, and document-status records."""
+        requests = []
+        query = {
+            "TableName": DYNAMODB_CHUNKS_TABLE,
+            "KeyConditionExpression": "#corpus_id = :corpus_id",
+            "ExpressionAttributeNames": {"#corpus_id": "corpus_id"},
+            "ExpressionAttributeValues": {":corpus_id": _string(corpus_id)},
+            "ProjectionExpression": "corpus_id, chunk_id",
+        }
+        while True:
+            response = self.client.query(**query)
+            requests.extend(
+                {
+                    "DeleteRequest": {
+                        "Key": {
+                            "corpus_id": item["corpus_id"],
+                            "chunk_id": item["chunk_id"],
+                        }
                     }
                 }
-            }
-            for item in response.get("Items", [])
-        ]
+                for item in response.get("Items", [])
+            )
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query["ExclusiveStartKey"] = last_key
         for start in range(0, len(requests), 25):
             self.client.batch_write_item(
                 RequestItems={DYNAMODB_CHUNKS_TABLE: requests[start : start + 25]}
+            )
+
+        for document in self.list_document_statuses(corpus_id):
+            self.client.delete_item(
+                TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+                Key={
+                    "corpus_id": _string(corpus_id),
+                    "document_id": _string(document["document_id"]),
+                },
             )
         self.client.delete_item(
             TableName=DYNAMODB_CORPORA_TABLE,
@@ -706,3 +721,46 @@ class DynamoRepository:
             }
             for item in items
         ]
+
+    def delete_document(self, *, corpus_id: str, document_id: str) -> None:
+        """Delete every indexed chunk and the status record for one document."""
+        request = {
+            "TableName": DYNAMODB_CHUNKS_TABLE,
+            "KeyConditionExpression": "corpus_id = :corpus_id",
+            "FilterExpression": "document_id = :document_id",
+            "ExpressionAttributeValues": {
+                ":corpus_id": _string(corpus_id),
+                ":document_id": _string(document_id),
+            },
+            "ProjectionExpression": "corpus_id, chunk_id",
+        }
+        keys = []
+        while True:
+            response = self.client.query(**request)
+            keys.extend(
+                {
+                    "DeleteRequest": {
+                        "Key": {
+                            "corpus_id": item["corpus_id"],
+                            "chunk_id": item["chunk_id"],
+                        }
+                    }
+                }
+                for item in response.get("Items", [])
+            )
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            request["ExclusiveStartKey"] = last_key
+
+        for start in range(0, len(keys), 25):
+            self.client.batch_write_item(
+                RequestItems={DYNAMODB_CHUNKS_TABLE: keys[start : start + 25]}
+            )
+        self.client.delete_item(
+            TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
+            Key={
+                "corpus_id": _string(corpus_id),
+                "document_id": _string(document_id),
+            },
+        )

@@ -33,6 +33,14 @@ type UploadTracking = {
   filename: string
 }
 
+type DocumentPreview = {
+  url: string
+  text: string | null
+  isPdf: boolean
+}
+
+type OpenPreview = DocumentPreview & { name: string; revokeOnClose?: boolean }
+
 type RagSource = {
   number: number
   document_id: string
@@ -56,9 +64,70 @@ type AuthMode =
   | 'confirmResetPassword'
 
 type WorkspaceTab = 'ask' | 'manage'
+type CorporaTab = 'manage' | 'create'
+
+function fileKind(filename: string) {
+  if (filename.toLowerCase().endsWith('.pdf')) return 'PDF'
+  if (filename.toLowerCase().endsWith('.md')) return 'MD'
+  return 'TXT'
+}
+
+function corpusTypeLabel(corpusType: string) {
+  if (corpusType === 'research_abstract') return 'Abstracts ingested from arXiv'
+  if (corpusType === 'user_upload') return 'My corpus'
+  return 'Research corpus'
+}
+
+function corpusDisplayName(corpus: Corpus) {
+  return corpus.corpus_type === 'research_abstract' && corpus.name === 'My arXiv research corpus'
+    ? 'My ArXiv Research Corpus'
+    : corpus.name
+}
+
+function FileTypeIcon({ filename }: { filename: string }) {
+  const kind = fileKind(filename)
+  return <span className={`file-icon file-icon-${kind.toLowerCase()}`}>
+    {kind === 'PDF' ? <strong>PDF</strong> : <>
+      <svg viewBox="0 0 48 58" aria-hidden="true">
+        <path d="M9 2h21l9 9v45H9z" />
+        <path d="M30 2v10h9M16 24h16M16 31h16M16 38h12" />
+      </svg>
+      <strong>{kind}</strong>
+    </>}
+  </span>
+}
+
+function DeleteIcon() {
+  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+}
+
+function LocalFileTile({ file, onRemove, onOpen }: {
+  file: File
+  onRemove: () => void
+  onOpen: (preview: OpenPreview) => void
+}) {
+  const [preview, setPreview] = useState<DocumentPreview | null>(null)
+  useEffect(() => {
+    const url = URL.createObjectURL(file)
+    const isPdf = file.name.toLowerCase().endsWith('.pdf')
+    if (isPdf) setPreview({ url, isPdf: true, text: null })
+    else void file.text().then((text) => setPreview({ url, isPdf: false, text }))
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+  return <article className="document-tile pending-tile">
+    <button type="button" className="remove-document" aria-label={`Remove ${file.name}`} onClick={onRemove}><DeleteIcon /></button>
+    <button type="button" className="preview-trigger" onClick={() => preview && onOpen({ ...preview, name: file.name })}>
+      <div className="document-preview">
+        <FileTypeIcon filename={file.name} />
+      </div>
+      <strong>{file.name}</strong><span>Ready to upload</span>
+    </button>
+  </article>
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('ask')
+  const [corporaTab, setCorporaTab] = useState<CorporaTab>('manage')
   const [question, setQuestion] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -82,10 +151,17 @@ function App() {
   const [ragMessage, setRagMessage] = useState('')
   const [isAsking, setIsAsking] = useState(false)
   const [newCorpusName, setNewCorpusName] = useState('')
-  const [documentFile, setDocumentFile] = useState<File | null>(null)
+  const [documentFiles, setDocumentFiles] = useState<File[]>([])
+  const [additionalFiles, setAdditionalFiles] = useState<File[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState('')
+  const [addFilesMessage, setAddFilesMessage] = useState('')
   const [uploadTracking, setUploadTracking] = useState<UploadTracking | null>(null)
+  const [openPreview, setOpenPreview] = useState<OpenPreview | null>(null)
+  const [previewLoadingId, setPreviewLoadingId] = useState('')
+  const [deletingDocumentId, setDeletingDocumentId] = useState('')
+  const [pendingDeletionIds, setPendingDeletionIds] = useState<string[]>([])
+  const [deletingCorpusId, setDeletingCorpusId] = useState('')
 
   useEffect(() => {
     if (!uploadTracking) return
@@ -377,6 +453,8 @@ function App() {
     setSelectedCorpusId('')
     setDocumentCorpusId('')
     setDocuments([])
+    setAdditionalFiles([])
+    setPendingDeletionIds([])
     setRagAnswer(null)
     setRagMessage('')
   }
@@ -407,6 +485,9 @@ function App() {
       const result: Corpus[] = await response.json()
       setCorpora(result)
       setSelectedCorpusId((current) => current || result[0]?.id || '')
+      setDocumentCorpusId((current) =>
+        current || result.find((corpus) => corpus.corpus_type === 'user_upload')?.id || '',
+      )
       setCorporaMessage(`Loaded ${result.length} corpora`)
     } catch (error) {
       setCorpora([])
@@ -468,15 +549,18 @@ function App() {
 
     const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
     const name = newCorpusName.trim()
-    const file = documentFile
+    const files = documentFiles
 
-    if (!apiUrl || !name || !file) {
-      setUploadMessage('Configure the API, enter a name, and choose a file.')
+    if (!apiUrl || !name || files.length === 0) {
+      setUploadMessage('Configure the API, enter a name, and choose at least one file.')
       return
     }
 
-    if (file.size === 0 || file.size > 3 * 1024 * 1024) {
-      setUploadMessage('Choose a nonempty file no larger than 3 MiB.')
+    const invalidFile = files.find(
+      (file) => file.size === 0 || file.size > 3 * 1024 * 1024,
+    )
+    if (invalidFile) {
+      setUploadMessage(`${invalidFile.name} must be nonempty and no larger than 3 MiB.`)
       return
     }
 
@@ -529,31 +613,32 @@ function App() {
       setRagAnswer(null)
       setRagMessage('')
 
-      setUploadMessage(`Uploading ${file.name}...`)
-
-      const form = new FormData()
-      form.append('file', file)
-
-      const uploadResponse = await fetch(
-        `${apiUrl}/api/corpora/${encodeURIComponent(corpus.id)}/documents`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
+      let lastUploaded: UploadTracking | null = null
+      for (const [index, file] of files.entries()) {
+        setUploadMessage(`Uploading ${index + 1} of ${files.length}: ${file.name}`)
+        const form = new FormData()
+        form.append('file', file)
+        const uploadResponse = await fetch(
+          `${apiUrl}/api/corpora/${encodeURIComponent(corpus.id)}/documents`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}` },
+            body: form,
           },
-          body: form,
-        },
-      )
-
-      await checkResponse(uploadResponse)
-      const uploaded: { document_id: string } = await uploadResponse.json()
+        )
+        await checkResponse(uploadResponse)
+        const uploaded: { document_id: string } = await uploadResponse.json()
+        lastUploaded = {
+          corpusId: corpus.id,
+          documentId: uploaded.document_id,
+          filename: file.name,
+        }
+      }
       setDocumentsRefresh((current) => current + 1)
-      setUploadMessage(`${file.name} uploaded. Checking processing status...`)
-      setUploadTracking({
-        corpusId: corpus.id,
-        documentId: uploaded.document_id,
-        filename: file.name,
-      })
+      setDocumentFiles([])
+      setUploadMessage(`${files.length} file${files.length === 1 ? '' : 's'} uploaded. Processing has started.`)
+      setUploadTracking(lastUploaded)
+      setCorporaTab('manage')
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Request failed.'
@@ -568,14 +653,197 @@ function App() {
     }
   }
 
+  async function handleSaveCorpusChanges(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
+    if (!apiUrl || !documentCorpusId) {
+      setAddFilesMessage('Choose a corpus first.')
+      return
+    }
+    if (additionalFiles.length === 0 && pendingDeletionIds.length === 0) {
+      setAddFilesMessage('Add or remove documents before saving changes.')
+      return
+    }
+
+    const invalidFile = additionalFiles.find(
+      (file) => file.size === 0 || file.size > 3 * 1024 * 1024,
+    )
+    if (invalidFile) {
+      setAddFilesMessage(`${invalidFile.name} must be nonempty and no larger than 3 MiB.`)
+      return
+    }
+    if (pendingDeletionIds.length > 0 && !window.confirm(
+      `Save changes and permanently delete ${pendingDeletionIds.length} document${pendingDeletionIds.length === 1 ? '' : 's'}?`,
+    )) return
+
+    setIsUploading(true)
+    setUploadTracking(null)
+    try {
+      const session = await fetchAuthSession()
+      const accessToken = session.tokens?.accessToken.toString()
+      if (!accessToken) throw new Error('Sign in before saving changes.')
+
+      const deletionCount = pendingDeletionIds.length
+      const additionCount = additionalFiles.length
+      for (const [index, documentId] of pendingDeletionIds.entries()) {
+        const document = documents.find((item) => item.document_id === documentId)
+        setDeletingDocumentId(documentId)
+        setAddFilesMessage(`Deleting ${index + 1} of ${deletionCount}: ${document?.filename ?? 'document'}`)
+        const response = await fetch(
+          `${apiUrl}/api/corpora/${encodeURIComponent(documentCorpusId)}/documents/${encodeURIComponent(documentId)}`,
+          { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } },
+        )
+        if (!response.ok) {
+          const body = await response.json().catch(() => null)
+          throw new Error(typeof body?.detail === 'string' ? body.detail : `Delete failed (${response.status}).`)
+        }
+        setPendingDeletionIds((current) => current.filter((id) => id !== documentId))
+      }
+      setDeletingDocumentId('')
+
+      let lastUploaded: UploadTracking | null = null
+      for (const [index, file] of additionalFiles.entries()) {
+        setAddFilesMessage(`Uploading ${index + 1} of ${additionCount}: ${file.name}`)
+        const form = new FormData()
+        form.append('file', file)
+        const response = await fetch(
+          `${apiUrl}/api/corpora/${encodeURIComponent(documentCorpusId)}/documents`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}` },
+            body: form,
+          },
+        )
+        if (!response.ok) {
+          const body = await response.json().catch(() => null)
+          throw new Error(
+            typeof body?.detail === 'string'
+              ? body.detail
+              : `${file.name} failed to upload (${response.status}).`,
+          )
+        }
+        const uploaded: { document_id: string } = await response.json()
+        lastUploaded = {
+          corpusId: documentCorpusId,
+          documentId: uploaded.document_id,
+          filename: file.name,
+        }
+        setAdditionalFiles((current) => current.filter((item) => item !== file))
+      }
+
+      setDocumentsRefresh((current) => current + 1)
+      setAddFilesMessage(`Changes saved: ${additionCount} added, ${deletionCount} deleted.`)
+      setUploadTracking(lastUploaded)
+    } catch (error) {
+      setAddFilesMessage(error instanceof Error ? error.message : 'Could not save changes.')
+      setDocumentsRefresh((current) => current + 1)
+    } finally {
+      setIsUploading(false)
+      setDeletingDocumentId('')
+    }
+  }
+
+  function handleDocumentCorpusChange(nextCorpusId: string) {
+    if (
+      (additionalFiles.length > 0 || pendingDeletionIds.length > 0) &&
+      !window.confirm('Discard your unsaved document changes?')
+    ) return
+    setDocumentCorpusId(nextCorpusId)
+    setAdditionalFiles([])
+    setPendingDeletionIds([])
+    setAddFilesMessage('')
+  }
+
+  function toggleDocumentDeletion(documentId: string) {
+    setPendingDeletionIds((current) =>
+      current.includes(documentId)
+        ? current.filter((id) => id !== documentId)
+        : [...current, documentId],
+    )
+  }
+
+  async function handleDeleteCorpus(corpus: Corpus) {
+    if ((additionalFiles.length > 0 || pendingDeletionIds.length > 0) && corpus.id === documentCorpusId) {
+      setDocumentsMessage('Save or discard your document changes before deleting this corpus.')
+      return
+    }
+    if (!window.confirm(`Delete "${corpus.name}" and all of its documents? This cannot be undone.`)) return
+    const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
+    if (!apiUrl) return
+    setDeletingCorpusId(corpus.id)
+    setDocumentsMessage(`Deleting ${corpus.name}...`)
+    try {
+      const session = await fetchAuthSession()
+      const token = session.tokens?.accessToken.toString()
+      if (!token) throw new Error('Sign in before deleting a corpus.')
+      const response = await fetch(`${apiUrl}/api/corpora/${encodeURIComponent(corpus.id)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(typeof body?.detail === 'string' ? body.detail : `Delete failed (${response.status}).`)
+      }
+      const remainingCorpora = corpora.filter((item) => item.id !== corpus.id)
+      const nextUserCorpus = remainingCorpora.find((item) => item.corpus_type === 'user_upload')
+      setCorpora(remainingCorpora)
+      if (documentCorpusId === corpus.id) {
+        setDocumentCorpusId(nextUserCorpus?.id ?? '')
+        setDocuments([])
+      }
+      if (selectedCorpusId === corpus.id) setSelectedCorpusId(remainingCorpora[0]?.id ?? '')
+      setDocumentsMessage(`${corpus.name} was deleted.`)
+    } catch (error) {
+      setDocumentsMessage(error instanceof Error ? error.message : 'Could not delete corpus.')
+    } finally {
+      setDeletingCorpusId('')
+    }
+  }
+
+  async function handleOpenStoredDocument(document: UploadedDocument) {
+    const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
+    if (!apiUrl || !documentCorpusId) return
+    setPreviewLoadingId(document.document_id)
+    try {
+      const session = await fetchAuthSession()
+      const token = session.tokens?.accessToken.toString()
+      if (!token) throw new Error('Sign in to preview this document.')
+      const response = await fetch(
+        `${apiUrl}/api/corpora/${encodeURIComponent(documentCorpusId)}/documents/${encodeURIComponent(document.document_id)}/content`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      )
+      if (!response.ok) throw new Error(`Could not load preview (${response.status}).`)
+      const blob = await response.blob()
+      const isPdf = document.filename.toLowerCase().endsWith('.pdf')
+      setOpenPreview({
+        name: document.filename,
+        isPdf,
+        url: URL.createObjectURL(blob),
+        text: isPdf ? null : await blob.text(),
+        revokeOnClose: true,
+      })
+    } catch (error) {
+      setDocumentsMessage(error instanceof Error ? error.message : 'Could not load preview.')
+    } finally {
+      setPreviewLoadingId('')
+    }
+  }
+
+  function closePreview() {
+    if (openPreview?.revokeOnClose) URL.revokeObjectURL(openPreview.url)
+    setOpenPreview(null)
+  }
+
   if (!authChecked) return <main className="auth-loading" role="status">Opening Research Agent...</main>
+
+  const userCorpora = corpora.filter((corpus) => corpus.corpus_type === 'user_upload')
+  const selectedCorpus = corpora.find((corpus) => corpus.id === selectedCorpusId)
 
   return (
     <main className={signedInUser ? 'app workspace-layout' : 'app login-layout'}>
       {!signedInUser && <div className="login-intro">
         <span className="brand-mark">R<span>·</span>A</span>
         <p className="eyebrow">YOUR RESEARCH WORKSPACE</p>
-        <h1>Research starts with a better question.</h1>
+        <h1>Research Starts with a Better Question.</h1>
         <p>Explore scientific literature and your own documents with answers grounded in sources you can inspect.</p>
         <div className="intro-features">
           <span>01 <strong>Ask across your corpora</strong></span>
@@ -595,10 +863,14 @@ function App() {
       </aside>}
 
       <div className={signedInUser ? 'workspace-content' : 'login-content'}>
-      {signedInUser && <header className="page-header"><p className="eyebrow">RESEARCH WORKSPACE</p><h1>{activeTab === 'ask' ? 'Ask' : 'My Corpora'}</h1><p>{activeTab === 'ask' ? 'Find answers grounded in your selected corpus.' : 'Organize and explore your research documents.'}</p></header>}
+      {signedInUser && <header className="page-header"><p className="eyebrow">RESEARCH WORKSPACE</p><h1>{activeTab === 'ask' ? 'Ask Research Agent' : 'My Corpora'}</h1><p>{activeTab === 'ask' ? 'An arXiv corpus is available for searching by default. Select a corpus from Your Corpora, then ask about findings, methods, themes, or other information contained in it. Click “Ask” to run a RAG semantic search and generate an answer grounded in the most relevant sources. To create a corpus from your own uploaded documents, click “My Corpora” in the left sidebar, where you can also manage and edit your corpora.' : 'Organize and explore your research documents and manage the corpora used by Research Agent.'}</p></header>}
+      {signedInUser && activeTab === 'manage' && <nav className="corpora-subtabs" aria-label="Corpus management">
+        <button type="button" className={corporaTab === 'manage' ? 'active' : ''} onClick={() => setCorporaTab('manage')}>Manage Corpora</button>
+        <button type="button" className={corporaTab === 'create' ? 'active' : ''} onClick={() => setCorporaTab('create')}>Create Corpus</button>
+      </nav>}
       {!signedInUser && <section className="auth-card">
         <p className="eyebrow">WELCOME TO RESEARCH AGENT</p>
-        <h2>{authMode === 'signIn' ? 'Sign in to continue' : authMode === 'signUp' ? 'Create your account' : authMode === 'resetPassword' || authMode === 'confirmResetPassword' ? 'Reset your password' : 'Confirm your email'}</h2>
+        <h2>{authMode === 'signIn' ? 'Sign In to Continue' : authMode === 'signUp' ? 'Create Your Account' : authMode === 'resetPassword' || authMode === 'confirmResetPassword' ? 'Reset Your Password' : 'Confirm Your Email'}</h2>
         {signedInUser ? (
           <div className="signed-in-row">
             <p>Signed in as {signedInUser}</p>
@@ -781,19 +1053,22 @@ function App() {
         <section className="corpora-card">
           <div className="corpora-heading">
             <div>
-              <h2>Available corpora</h2>
+              <h2>Your Corpora</h2>
               <p>{corporaMessage}</p>
             </div>
-            <button type="button" onClick={loadCorpora} disabled={isLoadingCorpora}>
-              {isLoadingCorpora ? 'Loading...' : 'Load corpora'}
-            </button>
           </div>
           {corpora.length > 0 && (
-            <ul>
+            <ul className="available-corpora-list">
               {corpora.map((corpus) => (
-                <li key={corpus.id}>
-                  <strong>{corpus.name}</strong>
-                  <span>{corpus.corpus_type}</span>
+                <li className={selectedCorpusId === corpus.id ? 'active' : ''} key={corpus.id}>
+                  <button type="button" onClick={() => {
+                    setSelectedCorpusId(corpus.id)
+                    setRagAnswer(null)
+                    setRagMessage('')
+                  }}>
+                    <strong>{corpusDisplayName(corpus)}</strong>
+                    <span>{corpusTypeLabel(corpus.corpus_type)}</span>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -801,49 +1076,92 @@ function App() {
         </section>
       )}
 
-      {signedInUser && activeTab === 'manage' && (
+      {signedInUser && activeTab === 'manage' && corporaTab === 'manage' && (
         <section className="corpora-card">
           <div className="corpora-heading">
             <div>
-              <h2>My documents</h2>
-              <p>{corporaMessage}</p>
+              <h2>Edit Existing Corpus Documents</h2>
+              <p>Select a corpus from Your Corpora on the right, then add, preview, or remove its documents. Click “Save Changes” to apply your updates.</p>
             </div>
-            <button type="button" onClick={loadCorpora} disabled={isLoadingCorpora}>
-              {isLoadingCorpora ? 'Loading...' : 'Load corpora'}
-            </button>
           </div>
-          <label htmlFor="document-corpus">Choose a corpus</label>
-          <select
-            id="document-corpus"
-            value={documentCorpusId}
-            onChange={(event) => setDocumentCorpusId(event.target.value)}
-          >
-            <option value="">Select a corpus</option>
-            {corpora
-              .filter((corpus) => corpus.corpus_type === 'user_upload')
-              .map((corpus) => (
-                <option key={corpus.id} value={corpus.id}>
-                  {corpus.name}
-                </option>
-              ))}
-          </select>
+          {isLoadingCorpora ? <p className="loading-corpora" role="status">Loading your corpora…</p> : userCorpora.length === 0 ? <div className="empty-corpora">
+            <span className="empty-corpora-icon">+</span>
+            <h2>Create Your First Corpus</h2>
+            <p>A corpus is a collection of documents that Research Agent can search when answering your questions.</p>
+            <ol>
+              <li>Name your corpus.</li>
+              <li>Add one or more PDF, TXT, or Markdown files.</li>
+              <li>Create it, then ask questions from the Ask page.</li>
+            </ol>
+            <button type="button" onClick={() => setCorporaTab('create')}>Create a corpus</button>
+          </div> : <div className="manage-corpora-layout">
+          <div className="corpus-document-editor">
+          <h3>{userCorpora.find((corpus) => corpus.id === documentCorpusId)?.name ?? 'Select a Corpus'}</h3>
+          <form className="add-files-form" onSubmit={handleSaveCorpusChanges}>
+            <input
+              className="file-input"
+              id="additional-files"
+              key={additionalFiles.length === 0 ? 'empty' : 'selected'}
+              type="file"
+              accept=".pdf,.txt,.md"
+              multiple
+              onChange={(event) =>
+                setAdditionalFiles(Array.from(event.target.files ?? []))
+              }
+              disabled={!documentCorpusId || isUploading}
+            />
+            <div className="document-grid">
+              <label className="add-document-tile" htmlFor="additional-files"><span>+</span><strong>Add files</strong></label>
+              {additionalFiles.map((file, index) => <LocalFileTile
+                key={`${file.name}-${file.lastModified}-${index}`}
+                file={file}
+                onRemove={() => setAdditionalFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                onOpen={setOpenPreview}
+              />)}
+              {documents.map((document) => {
+                const pendingDeletion = pendingDeletionIds.includes(document.document_id)
+                return <article className={`document-tile${pendingDeletion ? ' pending-deletion' : ''}`} key={document.document_id}>
+                  <button type="button" className={pendingDeletion ? 'undo-deletion' : 'remove-document'} aria-label={pendingDeletion ? `Keep ${document.filename}` : `Remove ${document.filename}`} disabled={deletingDocumentId === document.document_id || (!pendingDeletion && ['uploading', 'uploaded', 'processing'].includes(document.status))} onClick={() => toggleDocumentDeletion(document.document_id)}>{pendingDeletion ? 'Undo' : <DeleteIcon />}</button>
+                  <button type="button" className="preview-trigger" disabled={pendingDeletion || previewLoadingId === document.document_id} onClick={() => void handleOpenStoredDocument(document)}>
+                    <div className="document-preview">
+                      <FileTypeIcon filename={document.filename} />
+                    </div>
+                    <strong>{document.filename}</strong><span>{pendingDeletion ? 'Will be deleted' : previewLoadingId === document.document_id ? 'Opening…' : document.status}</span>
+                  </button>
+                </article>
+              })}
+            </div>
+            <button
+              type="submit"
+              disabled={!documentCorpusId || (additionalFiles.length === 0 && pendingDeletionIds.length === 0) || isUploading}
+            >
+              {isUploading ? 'Saving Changes...' : 'Save Changes'}
+            </button>
+            <p role="status">{addFilesMessage}</p>
+          </form>
           <p role="status">{documentsMessage}</p>
-          {documents.length > 0 && (
+          </div>
+          <aside className="corpus-list-panel">
+            <h3>Your Corpora</h3>
             <ul>
-              {documents.map((document) => (
-                <li key={document.document_id}>
-                  <strong>{document.filename}</strong>
-                  <span>{document.status}</span>
-                </li>
-              ))}
+              {userCorpora.map((corpus) => <li className={documentCorpusId === corpus.id ? 'active' : ''} key={corpus.id}>
+                <button type="button" className="select-corpus" onClick={() => handleDocumentCorpusChange(corpus.id)}>{corpus.name}</button>
+                <button type="button" className="delete-corpus" aria-label={`Delete ${corpus.name}`} disabled={deletingCorpusId === corpus.id} onClick={() => void handleDeleteCorpus(corpus)}><DeleteIcon /></button>
+              </li>)}
             </ul>
-          )}
+          </aside>
+          </div>}
         </section>
       )}
 
-      {signedInUser && activeTab === 'manage' && (
-        <form className="question-form" onSubmit={handleCreateAndUpload}>
-          <h2>Create a document corpus</h2>
+      {signedInUser && activeTab === 'manage' && corporaTab === 'create' && (
+        <form className="corpora-card create-corpus-form" onSubmit={handleCreateAndUpload}>
+          <div className="corpora-heading">
+            <div>
+              <h2>Create a Document Corpus</h2>
+              <p>Name the corpus and add one or more PDF, TXT, or Markdown files. Click “Create Corpus and Upload Files” to create the corpus.</p>
+            </div>
+          </div>
 
           <label htmlFor="new-corpus-name">Corpus name</label>
           <input
@@ -856,25 +1174,36 @@ function App() {
             required
           />
 
-          <label htmlFor="document-file">Document</label>
+          <div className="document-grid pending-grid">
+            <label className="add-document-tile" htmlFor="document-file"><span>+</span><strong>Choose files</strong></label>
+            {documentFiles.map((file, index) => <LocalFileTile
+              key={`${file.name}-${file.lastModified}-${index}`}
+              file={file}
+              onRemove={() => setDocumentFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+              onOpen={setOpenPreview}
+            />)}
+          </div>
+
           <input
+            className="file-input"
             id="document-file"
+            key={documentFiles.length === 0 ? 'empty' : 'selected'}
             type="file"
             accept=".pdf,.txt,.md"
+            multiple
             onChange={(event) =>
-              setDocumentFile(event.target.files?.[0] ?? null)
+              setDocumentFiles(Array.from(event.target.files ?? []))
             }
             disabled={isUploading}
-            required
           />
 
-          <p>PDF, TXT, or Markdown. Maximum 3 MiB per file.</p>
+          <p>PDF, TXT, or Markdown. Select one or more files, up to 3 MiB each.</p>
 
           <button
             type="submit"
-            disabled={isUploading || !newCorpusName.trim() || !documentFile}
+            disabled={isUploading || !newCorpusName.trim() || documentFiles.length === 0}
           >
-            {isUploading ? 'Uploading...' : 'Create corpus and upload'}
+            {isUploading ? 'Creating Corpus...' : 'Create Corpus and Upload Files'}
           </button>
 
           <p role="status">{uploadMessage}</p>
@@ -883,25 +1212,11 @@ function App() {
 
       {signedInUser && activeTab === 'ask' && (
         <form className="question-form" onSubmit={handleSubmit}>
-          <label htmlFor="corpus">Corpus</label>
-          <select
-            id="corpus"
-            value={selectedCorpusId}
-            onChange={(event) => setSelectedCorpusId(event.target.value)}
-            disabled={corpora.length === 0 || isAsking}
-          >
-            {corpora.length === 0 ? (
-              <option value="">Load a corpus first</option>
-            ) : (
-              corpora.map((corpus) => (
-                <option key={corpus.id} value={corpus.id}>
-                  {corpus.name}
-                </option>
-              ))
-            )}
-          </select>
-
-          <label htmlFor="question">Research question</label>
+          <div className="selected-corpus-field">
+            <span>Selected Corpus:</span>
+            <strong>{selectedCorpus ? corpusDisplayName(selectedCorpus) : 'Select a corpus above'}</strong>
+          </div>
+          <label htmlFor="question">Research Question</label>
           <textarea
             id="question"
             value={question}
@@ -942,6 +1257,14 @@ function App() {
           </ol>
         </section>
       )}
+      {openPreview && <div className="preview-backdrop" role="presentation" onMouseDown={closePreview}>
+        <section className="preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${openPreview.name}`} onMouseDown={(event) => event.stopPropagation()}>
+          <header><h2>{openPreview.name}</h2><button type="button" aria-label="Close preview" onClick={closePreview}>×</button></header>
+          {openPreview.isPdf
+            ? <iframe title={openPreview.name} src={openPreview.url} />
+            : <pre className="text-preview">{openPreview.text}</pre>}
+        </section>
+      </div>}
       </div>
     </main>
   )

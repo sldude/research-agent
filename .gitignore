@@ -9,3 +9,5 @@ __pycache__/
 .aws-sam/
 samconfig.toml
 /data/
+/AGENTS.md
+/PROJECT_CONTEXT.md

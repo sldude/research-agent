@@ -1,5 +1,6 @@
 """FastAPI entry point for the research-agent backend."""
 import logging
+import mimetypes
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -226,6 +227,121 @@ def get_document_status(
         "status": document["status"],
         "chunks_saved": document.get("chunks_saved"),
     }
+
+
+def _document_for_owner(corpus_id: str, document_id: str, user_id: str):
+    document = DynamoRepository().get_document_status(
+        corpus_id=corpus_id, document_id=document_id
+    )
+    if document is None or document["owner_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return document
+
+
+@app.get("/api/corpora/{corpus_id}/documents/{document_id}/content")
+def get_document_content(
+    corpus_id: str,
+    document_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Return a private uploaded file for an authenticated in-app preview."""
+    document = _document_for_owner(corpus_id, document_id, user_id)
+    session = boto3.Session(
+        profile_name=os.getenv("AWS_PROFILE"),
+        region_name=os.getenv("AWS_REGION", "us-east-2"),
+    )
+    try:
+        result = session.client("s3").get_object(
+            Bucket=document["s3_bucket"], Key=document["s3_key"]
+        )
+    except Exception as error:
+        logger.exception("Document preview failed: %s", document_id)
+        raise HTTPException(status_code=502, detail="Could not load document.") from error
+
+    media_type = mimetypes.guess_type(document["filename"])[0] or "application/octet-stream"
+    safe_name = document["filename"].replace('"', "")
+    return Response(
+        content=result["Body"].read(),
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+    )
+
+
+@app.delete("/api/corpora/{corpus_id}/documents/{document_id}", status_code=204)
+def delete_document(
+    corpus_id: str,
+    document_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Delete a finished upload, its file, and all indexed chunks."""
+    repository = DynamoRepository()
+    document = repository.get_document_status(
+        corpus_id=corpus_id, document_id=document_id
+    )
+    if document is None or document["owner_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if document["status"] in {"uploading", "uploaded", "processing"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Wait for document processing to finish before deleting it.",
+        )
+
+    session = boto3.Session(
+        profile_name=os.getenv("AWS_PROFILE"),
+        region_name=os.getenv("AWS_REGION", "us-east-2"),
+    )
+    try:
+        session.client("s3").delete_object(
+            Bucket=document["s3_bucket"], Key=document["s3_key"]
+        )
+        repository.delete_document(corpus_id=corpus_id, document_id=document_id)
+    except Exception as error:
+        logger.exception("Document deletion failed: %s", document_id)
+        raise HTTPException(status_code=502, detail="Could not delete document.") from error
+    return Response(status_code=204)
+
+
+@app.delete("/api/corpora/{corpus_id}", status_code=204)
+def delete_corpus(
+    corpus_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Delete a user-owned corpus and all of its stored documents."""
+    repository = DynamoRepository()
+    corpus = repository.get_corpus(corpus_id)
+    if corpus is None or corpus.owner_id != user_id:
+        raise HTTPException(status_code=404, detail="Corpus not found.")
+
+    documents = repository.list_document_statuses(corpus_id)
+    if any(
+        document["status"] in {"uploading", "uploaded", "processing"}
+        for document in documents
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Wait for all documents to finish processing before deleting this corpus.",
+        )
+
+    session = boto3.Session(
+        profile_name=os.getenv("AWS_PROFILE"),
+        region_name=os.getenv("AWS_REGION", "us-east-2"),
+    )
+    s3 = session.client("s3")
+    try:
+        for listed_document in documents:
+            document = repository.get_document_status(
+                corpus_id=corpus_id,
+                document_id=listed_document["document_id"],
+            )
+            if document is not None:
+                s3.delete_object(
+                    Bucket=document["s3_bucket"], Key=document["s3_key"]
+                )
+        repository.delete_corpus(corpus_id)
+    except Exception as error:
+        logger.exception("Corpus deletion failed: %s", corpus_id)
+        raise HTTPException(status_code=502, detail="Could not delete corpus.") from error
+    return Response(status_code=204)
 
 
 @app.post("/api/corpora", response_model=CorpusResponse)

@@ -159,6 +159,7 @@ Resources:
           - Authorization
           - Content-Type
         AllowMethods:
+          - DELETE
           - GET
           - POST
           - OPTIONS
@@ -214,12 +215,15 @@ Resources:
             - Sid: UploadDocuments
               Effect: Allow
               Action:
+                - s3:DeleteObject
+                - s3:GetObject
                 - s3:PutObject
               Resource:
                 - !Sub arn:${AWS::Partition}:s3:::${DocumentUploadBucketName}/uploads/*
             - Sid: CreateUserCorpora
               Effect: Allow
               Action:
+                - dynamodb:DeleteItem
                 - dynamodb:PutItem
               Resource:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CorporaTableName}
@@ -227,11 +231,19 @@ Resources:
               Effect: Allow
               Action:
                 - dynamodb:GetItem
+                - dynamodb:DeleteItem
                 - dynamodb:PutItem
                 - dynamodb:UpdateItem
                 - dynamodb:Query
               Resource:
                 - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DocumentStatusTableName}
+            - Sid: DeleteDocumentChunks
+              Effect: Allow
+              Action:
+                - dynamodb:BatchWriteItem
+                - dynamodb:Query
+              Resource:
+                - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChunksTableName}
       Events:
         HealthRoute:
           Type: HttpApi
