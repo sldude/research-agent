@@ -2,6 +2,8 @@
 import logging
 import mimetypes
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 import boto3
@@ -238,6 +240,21 @@ def _document_for_owner(corpus_id: str, document_id: str, user_id: str):
     return document
 
 
+def _document_is_active(document: dict) -> bool:
+    """Protect current ingestion while allowing stale records to be cleaned up."""
+    if document["status"] == "processing":
+        return document.get("lease_until", int(time.time()) + 1) > int(time.time())
+    if document["status"] not in {"uploading", "uploaded"}:
+        return False
+    try:
+        updated_at = datetime.fromisoformat(document["updated_at"])
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - updated_at).total_seconds() < 10 * 60
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
 @app.get("/api/corpora/{corpus_id}/documents/{document_id}/content")
 def get_document_content(
     corpus_id: str,
@@ -280,10 +297,10 @@ def delete_document(
     )
     if document is None or document["owner_id"] != user_id:
         raise HTTPException(status_code=404, detail="Document not found.")
-    if document["status"] in {"uploading", "uploaded", "processing"}:
+    if _document_is_active(document):
         raise HTTPException(
             status_code=409,
-            detail="Wait for document processing to finish before deleting it.",
+            detail="Wait for recent document processing to finish before deleting it.",
         )
 
     session = boto3.Session(
@@ -313,13 +330,19 @@ def delete_corpus(
         raise HTTPException(status_code=404, detail="Corpus not found.")
 
     documents = repository.list_document_statuses(corpus_id)
-    if any(
-        document["status"] in {"uploading", "uploaded", "processing"}
+    document_metadata = [
+        repository.get_document_status(
+            corpus_id=corpus_id, document_id=document["document_id"]
+        )
         for document in documents
+    ]
+    if any(
+        document is not None and _document_is_active(document)
+        for document in document_metadata
     ):
         raise HTTPException(
             status_code=409,
-            detail="Wait for all documents to finish processing before deleting this corpus.",
+            detail="Wait for recent document processing to finish before deleting this corpus.",
         )
 
     session = boto3.Session(
@@ -328,11 +351,7 @@ def delete_corpus(
     )
     s3 = session.client("s3")
     try:
-        for listed_document in documents:
-            document = repository.get_document_status(
-                corpus_id=corpus_id,
-                document_id=listed_document["document_id"],
-            )
+        for document in document_metadata:
             if document is not None:
                 s3.delete_object(
                     Bucket=document["s3_bucket"], Key=document["s3_key"]

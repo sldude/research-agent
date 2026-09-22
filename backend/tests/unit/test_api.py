@@ -291,10 +291,11 @@ class ApiTests(unittest.TestCase):
         listed = {"document_id": "doc-1", "filename": "notes.txt", "status": "ready",
                   "created_at": "now", "chunks_saved": 1}
         repository.list_document_statuses.return_value = [listed]
-        repository.get_document_status.return_value = {
+        metadata = {
             **listed, "corpus_id": "corpus-1", "owner_id": "test-user",
             "s3_bucket": "uploads", "s3_key": "uploads/user/doc-1.txt", "updated_at": "now",
         }
+        repository.get_document_status.return_value = metadata
 
         response = self.client.delete("/api/corpora/corpus-1")
         self.assertEqual(204, response.status_code)
@@ -304,6 +305,7 @@ class ApiTests(unittest.TestCase):
         repository.delete_corpus.assert_called_once_with("corpus-1")
 
         listed["status"] = "processing"
+        metadata["status"] = "processing"
         repository.delete_corpus.reset_mock()
         self.assertEqual(409, self.client.delete("/api/corpora/corpus-1").status_code)
         repository.delete_corpus.assert_not_called()

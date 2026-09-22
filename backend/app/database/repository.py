@@ -481,6 +481,8 @@ class DynamoRepository:
         }
         if "chunks_saved" in item:
             document["chunks_saved"] = int(item["chunks_saved"]["N"])
+        if "lease_until" in item:
+            document["lease_until"] = int(item["lease_until"]["N"])
         return document
 
     def finish_document_upload(

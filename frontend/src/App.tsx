@@ -1121,7 +1121,7 @@ function App() {
               {documents.map((document) => {
                 const pendingDeletion = pendingDeletionIds.includes(document.document_id)
                 return <article className={`document-tile${pendingDeletion ? ' pending-deletion' : ''}`} key={document.document_id}>
-                  <button type="button" className={pendingDeletion ? 'undo-deletion' : 'remove-document'} aria-label={pendingDeletion ? `Keep ${document.filename}` : `Remove ${document.filename}`} disabled={deletingDocumentId === document.document_id || (!pendingDeletion && ['uploading', 'uploaded', 'processing'].includes(document.status))} onClick={() => toggleDocumentDeletion(document.document_id)}>{pendingDeletion ? 'Undo' : <DeleteIcon />}</button>
+                  <button type="button" className={pendingDeletion ? 'undo-deletion' : 'remove-document'} aria-label={pendingDeletion ? `Keep ${document.filename}` : `Remove ${document.filename}`} disabled={deletingDocumentId === document.document_id || (!pendingDeletion && ['uploading', 'processing'].includes(document.status))} onClick={() => toggleDocumentDeletion(document.document_id)}>{pendingDeletion ? 'Undo' : <DeleteIcon />}</button>
                   <button type="button" className="preview-trigger" disabled={pendingDeletion || previewLoadingId === document.document_id} onClick={() => void handleOpenStoredDocument(document)}>
                     <div className="document-preview">
                       <FileTypeIcon filename={document.filename} />
