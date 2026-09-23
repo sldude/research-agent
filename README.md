@@ -37,30 +37,50 @@ The frontend handles interaction while the backend owns access checks, retrieval
 
 DynamoDB holds both document records and their searchable vectors, avoiding a separate vector database and a second copy of source metadata. Three tables separate corpus definitions, embedded chunks, and upload status. A document can have many chunks, but citations and document counts refer to distinct documents.
 
-```mermaid
-flowchart TB
-    Corpora["research-agent-corpora<br/>PK: corpus_id<br/>name, corpus_type, owner_id, created_at"]
-    Chunks["research-agent-chunks<br/>PK: corpus_id · SK: chunk_id<br/>document_id, source, external_id<br/>title, content, source_url<br/>embedding, embedding_model, embedding_dimensions"]
-    Status["research-agent-document-status<br/>PK: corpus_id · SK: document_id<br/>owner_id, filename, status<br/>s3_bucket, s3_key, chunks_saved"]
-    Index["embedding-index<br/>Vector field: embedding<br/>Cosine distance · 1,024 dimensions by default<br/>Search by corpus_id; filter by embedding_model"]
-
-    Corpora -->|One corpus has many chunks| Chunks
-    Corpora -->|One corpus has many upload records| Status
-    Status -.->|Upload ID matches chunk external_id| Chunks
-    Chunks -->|Native vector index| Index
-```
-
-The database uses three tables. **PK** is the partition key; **SK** is the sort key. These are application-managed relationships, not database-enforced foreign keys.
-
-Chunks sharing a `document_id` belong to the same document. Their sort keys take the form `document_id#chunk:000000`, `document_id#chunk:000001`, and so on. arXiv papers typically have one title-and-abstract chunk; uploaded files can have many.
-
-The status table tracks uploads only. Its `document_id` is the original upload ID, stored as `external_id` on the corresponding chunks; the chunks' own `document_id` is derived from the source and external ID. Original file bytes remain in S3. Vector search returns matching chunk keys and distances, then the backend fetches the text and metadata from the chunks table.
-
 Original files live in S3. A short-lived upload authorization lets the browser send file bytes directly to S3, keeping file transfer out of the API request. A separate Lambda performs extraction and embedding asynchronously, so uploading a file does not require waiting for all its text to be processed. Status records let the frontend show progress; failed worker invocations have retries and an SQS failure destination.
 
 Embedding and generation are separate operations. Titan provides a common vector representation for stored text and questions; Nova receives the selected text as evidence when composing an answer. This lets the app retrieve from a specific corpus without putting the entire collection into the model prompt.
 
 Document counts load separately from the corpus list so expensive counting does not block corpus selection or questions.
+
+### DynamoDB structure
+
+The database uses three tables. In this ERD, fields marked **PK** together form a table's primary key; comments distinguish DynamoDB partition and sort keys. Relationships are managed by the application, not enforced as foreign keys.
+
+```mermaid
+erDiagram
+    CORPORA ||--o{ CHUNKS : contains
+    CORPORA ||--o{ DOCUMENT_STATUS : tracks
+
+    CORPORA {
+        string corpus_id PK "Partition key"
+        string name
+        string corpus_type
+        string owner_id "Absent for shared corpora"
+    }
+    CHUNKS {
+        string corpus_id PK "Partition key"
+        string chunk_id PK "Sort key"
+        string document_id "Groups chunks of one document"
+        string external_id "arXiv ID or upload ID"
+        string content
+        list embedding "Indexed for cosine search"
+        string embedding_model
+    }
+    DOCUMENT_STATUS {
+        string corpus_id PK "Partition key"
+        string document_id PK "Sort key - original upload ID"
+        string filename
+        string status
+        string s3_key
+    }
+```
+
+Table names use the `research-agent-` prefix: `corpora`, `chunks`, and `document-status`. They store corpus ownership, document text and embeddings, and upload progress respectively. The chunks table's vector index searches the `embedding` field using cosine distance, scoped to a corpus and filtered by embedding model.
+
+Chunks sharing a `document_id` belong to the same document. Their sort keys take the form `document_id#chunk:000000`, `document_id#chunk:000001`, and so on. arXiv papers typically have one title-and-abstract chunk; uploaded files can have many.
+
+The status table tracks uploads only. Its `document_id` is the original upload ID, stored as `external_id` on the corresponding chunks; the chunks' own `document_id` is derived from the source and external ID. Original file bytes remain in S3. Vector search returns matching chunk keys and distances, then the backend fetches the text and metadata from the chunks table.
 
 ## How documents become searchable
 
