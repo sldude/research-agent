@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 import boto3
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from mangum import Mangum
 
 from app.database.repository import DynamoRepository
-from app.schemas.api_schemas import CorpusResponse, RagAnswer, RagQuestionRequest, CreateCorpusRequest
+from app.schemas.api_schemas import CorpusResponse, RagAnswer, RagQuestionRequest, CreateCorpusRequest, DocumentUploadRequest
 from app.services.rag_service import answer_question
+from app.upload_limits import MAX_UPLOAD_BYTES, UPLOAD_POST_EXPIRES_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -105,15 +106,15 @@ def generate_rag_answer(
         repository=repository,
     )
 
-MAX_UPLOAD_BYTES = 3 * 1024 * 1024  # Initial application limit: 3 MiB
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 
 @app.post("/api/corpora/{corpus_id}/documents", status_code=status.HTTP_201_CREATED,)
 def upload_document(
     corpus_id: str,
-    file: UploadFile,
+    request: DocumentUploadRequest,
     user_id: str = Depends(get_current_user_id),
 ):
+    """Authorize an upload; the browser sends the actual file directly to S3."""
     repository = DynamoRepository()
     corpus = repository.get_corpus(corpus_id)
 
@@ -126,7 +127,7 @@ def upload_document(
             detail="You can only upload to a corpus you own.",
         )
 
-    filename = file.filename or "document"
+    filename = request.filename
     extension = Path(filename).suffix.lower()
 
     if extension not in ALLOWED_EXTENSIONS:
@@ -135,16 +136,10 @@ def upload_document(
             detail="Supported files: PDF, TXT, and Markdown.",
         )
 
-    # Read at most the limit plus one byte to detect oversized files.
-    contents = file.file.read(MAX_UPLOAD_BYTES + 1)
-
-    if not contents:
-        raise HTTPException(status_code=400, detail="The file is empty.")
-
-    if len(contents) > MAX_UPLOAD_BYTES:
+    if request.size_bytes > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail="The file must be 3 MiB or smaller.",
+            detail="The file must be 5 MB (5,000,000 bytes) or smaller.",
         )
 
     bucket = os.getenv("DOCUMENT_UPLOAD_BUCKET")
@@ -164,7 +159,28 @@ def upload_document(
         region_name=os.getenv("AWS_REGION", "us-east-2"),
     )
     s3 = session.client("s3")
-    # Create metadata before S3 can notify the ingestion worker.
+    try:
+        # Boto3 adds exact bucket/key conditions. S3 enforces the real file size,
+        # independently of the size claimed by the browser.
+        upload = s3.generate_presigned_post(
+            Bucket=bucket,
+            Key=object_key,
+            Fields={"Content-Type": "application/octet-stream"},
+            Conditions=[
+                ["content-length-range", 1, MAX_UPLOAD_BYTES],
+                {"Content-Type": "application/octet-stream"},
+            ],
+            ExpiresIn=UPLOAD_POST_EXPIRES_SECONDS,
+        )
+    except Exception as error:
+        logger.exception("Could not authorize document upload: %s", document_id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not authorize document upload. Please try again.",
+        ) from error
+
+    # Persist before returning the form so S3 events always find the metadata.
+    # Signing happens first to avoid orphan records on signing failures.
     repository.create_document_status(
         corpus_id=corpus_id,
         document_id=document_id,
@@ -174,40 +190,14 @@ def upload_document(
         s3_key=object_key,
     )
 
-    try:
-        s3.put_object(
-            Bucket=bucket,
-            Key=object_key,
-            Body=contents,
-            ContentType="application/octet-stream",
-        )
-    except Exception as error:
-        logger.exception("Document upload failed: %s", document_id)
-        try:
-            repository.finish_document_upload(
-                corpus_id=corpus_id,
-                document_id=document_id,
-                succeeded=False,
-            )
-        except Exception:
-            logger.exception("Could not record upload failure: %s", document_id)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Document upload failed. Please try again.",
-        ) from error
-
-    repository.finish_document_upload(
-        corpus_id=corpus_id,
-        document_id=document_id,
-        succeeded=True,
-    )
-
     return {
         "document_id": document_id,
         "corpus_id": corpus_id,
         "filename": filename,
-        "size_bytes": len(contents),
-        "status": "uploaded",
+        "status": "uploading",
+        "upload_url": upload["url"],
+        "fields": upload["fields"],
+        "expires_in": UPLOAD_POST_EXPIRES_SECONDS,
     }
 
 

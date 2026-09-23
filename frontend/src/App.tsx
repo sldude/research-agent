@@ -11,6 +11,7 @@ import {
   signUp,
 } from 'aws-amplify/auth'
 import './App.css'
+import { MAX_UPLOAD_BYTES, uploadDocument } from './uploadDocument'
 
 type Corpus = {
   id: string
@@ -557,10 +558,10 @@ function App() {
     }
 
     const invalidFile = files.find(
-      (file) => file.size === 0 || file.size > 3 * 1024 * 1024,
+      (file) => file.size === 0 || file.size > MAX_UPLOAD_BYTES,
     )
     if (invalidFile) {
-      setUploadMessage(`${invalidFile.name} must be nonempty and no larger than 3 MiB.`)
+      setUploadMessage(`${invalidFile.name} must be nonempty and no larger than 5 MB.`)
       return
     }
 
@@ -616,18 +617,8 @@ function App() {
       let lastUploaded: UploadTracking | null = null
       for (const [index, file] of files.entries()) {
         setUploadMessage(`Uploading ${index + 1} of ${files.length}: ${file.name}`)
-        const form = new FormData()
-        form.append('file', file)
-        const uploadResponse = await fetch(
-          `${apiUrl}/api/corpora/${encodeURIComponent(corpus.id)}/documents`,
-          {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${accessToken}` },
-            body: form,
-          },
-        )
-        await checkResponse(uploadResponse)
-        const uploaded: { document_id: string } = await uploadResponse.json()
+        const uploaded = await uploadDocument(apiUrl, corpus.id, accessToken, file)
+        setDocumentFiles((current) => current.filter((item) => item !== file))
         lastUploaded = {
           corpusId: corpus.id,
           documentId: uploaded.document_id,
@@ -649,6 +640,7 @@ function App() {
           : message,
       )
     } finally {
+      setDocumentsRefresh((current) => current + 1)
       setIsUploading(false)
     }
   }
@@ -666,10 +658,10 @@ function App() {
     }
 
     const invalidFile = additionalFiles.find(
-      (file) => file.size === 0 || file.size > 3 * 1024 * 1024,
+      (file) => file.size === 0 || file.size > MAX_UPLOAD_BYTES,
     )
     if (invalidFile) {
-      setAddFilesMessage(`${invalidFile.name} must be nonempty and no larger than 3 MiB.`)
+      setAddFilesMessage(`${invalidFile.name} must be nonempty and no larger than 5 MB.`)
       return
     }
     if (pendingDeletionIds.length > 0 && !window.confirm(
@@ -704,25 +696,7 @@ function App() {
       let lastUploaded: UploadTracking | null = null
       for (const [index, file] of additionalFiles.entries()) {
         setAddFilesMessage(`Uploading ${index + 1} of ${additionCount}: ${file.name}`)
-        const form = new FormData()
-        form.append('file', file)
-        const response = await fetch(
-          `${apiUrl}/api/corpora/${encodeURIComponent(documentCorpusId)}/documents`,
-          {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${accessToken}` },
-            body: form,
-          },
-        )
-        if (!response.ok) {
-          const body = await response.json().catch(() => null)
-          throw new Error(
-            typeof body?.detail === 'string'
-              ? body.detail
-              : `${file.name} failed to upload (${response.status}).`,
-          )
-        }
-        const uploaded: { document_id: string } = await response.json()
+        const uploaded = await uploadDocument(apiUrl, documentCorpusId, accessToken, file)
         lastUploaded = {
           corpusId: documentCorpusId,
           documentId: uploaded.document_id,
@@ -1121,7 +1095,7 @@ function App() {
               {documents.map((document) => {
                 const pendingDeletion = pendingDeletionIds.includes(document.document_id)
                 return <article className={`document-tile${pendingDeletion ? ' pending-deletion' : ''}`} key={document.document_id}>
-                  <button type="button" className={pendingDeletion ? 'undo-deletion' : 'remove-document'} aria-label={pendingDeletion ? `Keep ${document.filename}` : `Remove ${document.filename}`} disabled={deletingDocumentId === document.document_id || (!pendingDeletion && ['uploading', 'processing'].includes(document.status))} onClick={() => toggleDocumentDeletion(document.document_id)}>{pendingDeletion ? 'Undo' : <DeleteIcon />}</button>
+                  <button type="button" className={pendingDeletion ? 'undo-deletion' : 'remove-document'} aria-label={pendingDeletion ? `Keep ${document.filename}` : `Remove ${document.filename}`} disabled={deletingDocumentId === document.document_id || (!pendingDeletion && document.status === 'processing')} onClick={() => toggleDocumentDeletion(document.document_id)}>{pendingDeletion ? 'Undo' : <DeleteIcon />}</button>
                   <button type="button" className="preview-trigger" disabled={pendingDeletion || previewLoadingId === document.document_id} onClick={() => void handleOpenStoredDocument(document)}>
                     <div className="document-preview">
                       <FileTypeIcon filename={document.filename} />
@@ -1197,7 +1171,7 @@ function App() {
             disabled={isUploading}
           />
 
-          <p>PDF, TXT, or Markdown. Select one or more files, up to 3 MiB each.</p>
+          <p>PDF, TXT, or Markdown. Select one or more files, up to 5 MB each.</p>
 
           <button
             type="submit"

@@ -1,10 +1,14 @@
 """Offline API tests; no DynamoDB or Bedrock calls are made."""
 
+import base64
+import json
 import os
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
+import boto3
+from botocore.config import Config
 from fastapi.testclient import TestClient
 
 from app.database.database_tables import CorpusRecord
@@ -29,10 +33,8 @@ class ApiTests(unittest.TestCase):
     @patch("app.main.logger")
     @patch("app.main.boto3.Session")
     @patch("app.main.DynamoRepository")
-    def test_upload_status_lifecycle(
-        self, repository_class: Mock, session_class: Mock, logger: Mock
-    ) -> None:
-        for failure in (None, "create", "s3", "failure_status"):
+    def test_upload_authorization(self, repository_class, session_class, logger):
+        for failure in (None, "sign", "create"):
             with self.subTest(failure=failure):
                 repository = Mock()
                 repository.get_corpus.return_value = CorpusRecord(
@@ -42,61 +44,114 @@ class ApiTests(unittest.TestCase):
                 repository_class.return_value = repository
                 s3 = Mock()
                 session_class.return_value.client.return_value = s3
-                events = []
-
-                def create(**kwargs):
-                    events.append("create")
-                    if failure == "create":
-                        raise RuntimeError("Database unavailable")
-
-                def upload(**kwargs):
-                    events.append("upload")
-                    if failure in ("s3", "failure_status"):
-                        raise RuntimeError("S3 unavailable")
-
-                def finish(**kwargs):
-                    events.append("finish")
-                    if failure == "failure_status":
-                        raise RuntimeError("Database unavailable")
-
-                repository.create_document_status.side_effect = create
-                repository.finish_document_upload.side_effect = finish
-                s3.put_object.side_effect = upload
-                client = TestClient(app, raise_server_exceptions=False)
-                response = client.post(
+                s3.generate_presigned_post.return_value = {
+                    "url": "https://example.test/upload", "fields": {"policy": "test"},
+                }
+                if failure == "sign":
+                    s3.generate_presigned_post.side_effect = RuntimeError("Signing failed")
+                if failure == "create":
+                    repository.create_document_status.side_effect = RuntimeError("Database unavailable")
+                response = TestClient(app, raise_server_exceptions=False).post(
                     "/api/corpora/corpus-1/documents",
-                    files={"file": ("notes.txt", b"Example text", "text/plain")},
+                    json={"filename": "notes.PDF", "size_bytes": 5_000_000},
                 )
-
+                s3.put_object.assert_not_called()
+                repository.finish_document_upload.assert_not_called()
+                if failure == "sign":
+                    self.assertEqual(502, response.status_code)
+                    repository.create_document_status.assert_not_called()
+                    continue
                 if failure == "create":
                     self.assertEqual(500, response.status_code)
-                    self.assertEqual(["create"], events)
-                    s3.put_object.assert_not_called()
-                    repository.finish_document_upload.assert_not_called()
+                    self.assertNotIn("fields", response.text)
                     continue
-
-                self.assertEqual(["create", "upload", "finish"], events)
+                self.assertEqual(201, response.status_code)
+                result = response.json()
                 metadata = repository.create_document_status.call_args.kwargs
-                repository.finish_document_upload.assert_called_once_with(
-                    corpus_id="corpus-1",
-                    document_id=metadata["document_id"],
-                    succeeded=failure is None,
-                )
                 self.assertEqual("test-user", metadata["owner_id"])
-                self.assertEqual("notes.txt", metadata["filename"])
+                self.assertEqual("notes.PDF", metadata["filename"])
                 self.assertEqual("test-uploads", metadata["s3_bucket"])
                 self.assertEqual(
-                    metadata["s3_key"], s3.put_object.call_args.kwargs["Key"]
+                    f"uploads/test-user/corpus-1/{result['document_id']}.pdf",
+                    metadata["s3_key"],
                 )
-                self.assertEqual(201 if failure is None else 502, response.status_code)
-                if failure is None:
-                    self.assertEqual("uploaded", response.json()["status"])
-                    self.assertEqual(metadata["document_id"], response.json()["document_id"])
-                else:
-                    self.assertEqual(
-                        "Document upload failed. Please try again.",
-                        response.json()["detail"],
-                    )
+                s3.generate_presigned_post.assert_called_once_with(
+                    Bucket="test-uploads", Key=metadata["s3_key"],
+                    Fields={"Content-Type": "application/octet-stream"},
+                    Conditions=[
+                        ["content-length-range", 1, 5_000_000],
+                        {"Content-Type": "application/octet-stream"},
+                    ],
+                    ExpiresIn=300,
+                )
+                self.assertEqual("uploading", result["status"])
+                self.assertEqual("https://example.test/upload", result["upload_url"])
+                self.assertEqual({"policy": "test"}, result["fields"])
+                self.assertEqual(300, result["expires_in"])
+
+    @patch.dict(os.environ, {"DOCUMENT_UPLOAD_BUCKET": "test-uploads"})
+    @patch("app.main.boto3.Session")
+    @patch("app.main.DynamoRepository")
+    def test_upload_validation(self, repository_class, session_class):
+        repository = repository_class.return_value
+        for owner, filename, size, expected in (
+            ("test-user", "notes.txt", 5_000_001, 413),
+            ("test-user", "notes.exe", 1, 415),
+            ("test-user", "notes.txt", 0, 422),
+            ("test-user", "notes.txt", -1, 422),
+            ("test-user", "notes.txt", "5", 422),
+            ("test-user", "notes.txt", True, 422),
+            ("test-user", "", 1, 422),
+            ("other-user", "notes.txt", 1, 403),
+            (None, "notes.txt", 1, 403),
+        ):
+            with self.subTest(owner=owner, filename=filename, size=size):
+                repository.get_corpus.return_value = CorpusRecord(
+                    id="corpus-1", name="Uploads", corpus_type="user_upload",
+                    owner_id=owner, created_at=datetime.now(timezone.utc),
+                )
+                response = self.client.post(
+                    "/api/corpora/corpus-1/documents",
+                    json={"filename": filename, "size_bytes": size},
+                )
+                self.assertEqual(expected, response.status_code)
+        repository.get_corpus.return_value = None
+        response = self.client.post(
+            "/api/corpora/missing/documents",
+            json={"filename": "notes.txt", "size_bytes": 1},
+        )
+        self.assertEqual(404, response.status_code)
+        repository.create_document_status.assert_not_called()
+        session_class.assert_not_called()
+
+    @patch.dict(os.environ, {"DOCUMENT_UPLOAD_BUCKET": "test-uploads"}, clear=True)
+    @patch("app.main.DynamoRepository")
+    def test_upload_signed_policy(self, repository_class):
+        """Inspect a real SDK policy using fake credentials and no network."""
+        repository_class.return_value.get_corpus.return_value = CorpusRecord(
+            id="corpus-1", name="Uploads", corpus_type="user_upload",
+            owner_id="test-user", created_at=datetime.now(timezone.utc),
+        )
+        s3 = boto3.client(
+            "s3", region_name="us-east-2",
+            aws_access_key_id="test", aws_secret_access_key="test",
+            config=Config(signature_version="s3v4"),
+        )
+        with patch("app.main.boto3.Session") as session_class:
+            session_class.return_value.client.return_value = s3
+            response = self.client.post(
+                "/api/corpora/corpus-1/documents",
+                json={"filename": "notes.md", "size_bytes": 1},
+            )
+        self.assertEqual(201, response.status_code)
+        result = response.json()
+        policy = json.loads(base64.b64decode(result["fields"]["policy"]))
+        self.assertIn(["content-length-range", 1, 5_000_000], policy["conditions"])
+        self.assertIn({"bucket": "test-uploads"}, policy["conditions"])
+        self.assertIn(
+            {"key": f"uploads/test-user/corpus-1/{result['document_id']}.md"},
+            policy["conditions"],
+        )
 
     def test_cors_preflight(self) -> None:
         response = self.client.options("/api/corpora")

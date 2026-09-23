@@ -30,6 +30,40 @@ data. The provisioning script will skip creating it when configured with that na
 
 ## Uploaded document ingestion
 
+Upload migration, step 1: `POST /api/corpora/{corpus_id}/documents` now accepts
+authenticated JSON metadata, for example
+`{"filename": "paper.pdf", "size_bytes": 5000000}`, instead of multipart file data.
+It checks corpus ownership and the PDF/TXT/Markdown extension, signs an S3 POST
+for one generated object key, and saves an `uploading` record before responding.
+The response includes `document_id`, `corpus_id`, `filename`, `status`,
+`upload_url`, `fields`, and `expires_in` (300 seconds). The signed policy enforces
+1 through 5,000,000 bytes. The browser must POST all returned fields followed by
+the file to `upload_url`, then poll the existing status endpoint. Authorization
+does not mean the file has been uploaded; the S3 worker advances its status.
+
+Both frontend forms now send files directly to S3 and the API and worker share
+`backend/app/upload_limits.py` (5 MB). Existing status polling continues after
+S3 accepts a file. Failed or abandoned uploads remain visible and can be removed
+through My Corpora after the backend's ten-minute grace period. Cleanup is manual;
+there is no automatic expiration or per-user quota yet.
+
+Before deploying, configure CORS on the existing bucket. From `backend`, preview
+this merge of a POST rule with the existing rules (use your configured AWS profile):
+
+```powershell
+.\backend_venv\Scripts\python.exe -m app.scripts.configure_upload_cors --bucket aws-sam-cli-managed-default-samclisourcebucket-zkwprzmdq7df --origin https://research-agent-iota.vercel.app --origin http://localhost:5173 --profile research-agent
+```
+
+Add `--apply` to save it. This preserves other CORS rules and does not change the
+bucket's public access settings. If your deployment uses a different bucket or
+frontend origin, pass those values instead. The existing S3 event notification
+must include `ObjectCreated:Post` (an all-object-created notification already does).
+
+Deploy the API and worker together with SAM, then deploy the frontend through
+Vercel. The new JSON authorization API is incompatible with the previous frontend,
+so coordinate those releases. Verify a 5,000,000-byte TXT file reaches `ready`,
+a 5,000,001-byte file is rejected, and another user's corpus cannot be uploaded to.
+
 Document uploads use the separate `research-agent-document-ingestion` Lambda
 defined in `backend/template.yaml`. Before enabling its S3 notification, run
 the offline worker tests from `backend`:

@@ -90,3 +90,10 @@ class RagQuestionRequest(BaseModel):
 
 class CreateCorpusRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+
+
+class DocumentUploadRequest(BaseModel):
+    """File metadata used to authorize a direct upload to S3."""
+
+    filename: str = Field(min_length=1, max_length=255)
+    size_bytes: int = Field(strict=True, gt=0)

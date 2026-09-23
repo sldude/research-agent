@@ -12,10 +12,10 @@ import boto3
 
 from app.database.repository import DynamoRepository
 from app.services.document_ingestion import ingest_document
+from app.upload_limits import MAX_UPLOAD_BYTES
 
 
 logger = logging.getLogger(__name__)
-MAX_UPLOAD_BYTES = 3 * 1024 * 1024
 
 
 def handler(event, context):
@@ -102,6 +102,8 @@ def handler(event, context):
 
             if len(contents) > MAX_UPLOAD_BYTES:
                 raise ValueError("Document exceeds the upload size limit.")
+            if not contents:
+                raise ValueError("Document is empty.")
 
             result = ingest_document(
                 corpus_id=corpus_id,

@@ -58,6 +58,26 @@ class DocumentWorkerTests(unittest.TestCase):
         self.s3.get_object.assert_not_called()
         self.ingest.assert_not_called()
 
+    def test_post_upload_at_five_mb_is_processed(self):
+        self.event["Records"][0]["eventName"] = "ObjectCreated:Post"
+        self.repository.get_document_status.return_value["status"] = "uploading"
+        self.s3.get_object.return_value = {"Body": BytesIO(b"a" * 5_000_000)}
+        handler(self.event, self.context)
+        self.assertEqual(5_000_000, len(self.ingest.call_args.kwargs["contents"]))
+        self.repository.mark_document_ready.assert_called_once()
+
+    def test_invalid_file_size_is_rejected_before_embedding(self):
+        for contents in (b"", b"a" * 5_000_001):
+            with self.subTest(size=len(contents)):
+                self.repository.mark_document_failed.reset_mock()
+                body = BytesIO(contents)
+                self.s3.get_object.return_value = {"Body": body}
+                with self.assertRaises(ValueError):
+                    handler(self.event, self.context)
+                self.assertTrue(body.closed)
+                self.ingest.assert_not_called()
+                self.repository.mark_document_failed.assert_called_once()
+
     def test_active_lease_raises_without_processing(self):
         self.repository.claim_document_processing.return_value = "busy"
         with self.assertRaisesRegex(RuntimeError, "another worker"):
