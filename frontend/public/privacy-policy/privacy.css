@@ -1,0 +1,11 @@
+:root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #24334b; background: #f8faff; line-height: 1.65; }
+body { margin: 0; }
+main { max-width: 760px; margin: 0 auto; padding: 40px 24px 64px; }
+h1, h2 { color: #172b4d; line-height: 1.25; }
+h1 { margin-bottom: 8px; font-size: 2rem; }
+h2 { margin-top: 32px; font-size: 1.2rem; }
+a { color: #234b9d; text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+.back, .updated { font-size: .875rem; }
+.updated { color: #59677d; }
+li { margin: 10px 0; }

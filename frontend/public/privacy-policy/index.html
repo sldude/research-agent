@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy | Research Agent</title>
+    <link rel="stylesheet" href="/privacy-policy/privacy.css" />
+  </head>
+  <body>
+    <main>
+      <a class="back" href="/">Back to Research Agent</a>
+      <h1>Privacy policy</h1>
+      <p class="updated">Last updated September 23, 2026</p>
+      <p>Thank you for using Research Agent. We want to be transparent about the information you share with the project and how it is used to help you explore research.</p>
+      <p>Research Agent is operated by Steven Liu in the United States.</p>
+
+      <h2>What data we collect</h2>
+      <ul>
+        <li><strong>Email address and account information:</strong> used to identify your account, sign you in, and send verification and password-recovery messages through Amazon Cognito.</li>
+        <li><strong>Uploaded documents:</strong> files you upload, their filenames, corpus names, extracted text, processing status, and embeddings (numerical representations used to search the text).</li>
+        <li><strong>Questions and answers:</strong> questions you submit, relevant document excerpts, and generated answers are processed to respond to your requests. <strong>Research Agent does not store chat history.</strong></li>
+        <li><strong>Technical data:</strong> hosting and cloud services may process IP addresses, browser information, request timestamps, identifiers, and error logs. Diagnostic logs may include portions of submitted or generated content.</li>
+      </ul>
+      <p>The app does not include advertising or analytics tracking code. It does not collect your browsing history or content from unrelated webpages. Its sign-in library uses browser storage to maintain your session.</p>
+
+      <h2>How we use your data</h2>
+      <p>We use your information to manage your account and corpora, store and search documents, answer your questions with source citations, and troubleshoot the service. The application does not use your uploads to train or fine-tune AI models; embeddings make the text searchable.</p>
+
+      <h2>Data security</h2>
+      <p>Research Agent uses managed authentication and backend ownership checks to restrict access to private corpora. Authorized operators and service providers may access information as needed to operate and support the service. No online service can guarantee complete security.</p>
+      <p>The backend is configured in the United States, and AI requests may be processed across US AWS regions. Website delivery may involve other locations used by the hosting provider.</p>
+
+      <h2>Data sharing</h2>
+      <p>Research Agent uses the following providers to deliver the service:</p>
+      <ul>
+        <li><strong>Amazon Web Services (AWS):</strong> Cognito manages authentication, S3 stores uploaded files, and DynamoDB stores document text, embeddings, and metadata. AWS also runs the backend and operational monitoring.</li>
+        <li><strong>Amazon Bedrock:</strong> Titan processes document text and questions to create embeddings. Nova processes questions and relevant document excerpts to generate answers.</li>
+        <li><strong>Vercel:</strong> hosts the frontend and processes requests needed to serve the website. Authorized file uploads go directly to AWS S3.</li>
+      </ul>
+      <p>For information about these providers, see <a href="https://aws.amazon.com/privacy/">AWS's privacy notice</a>, <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html">Bedrock's data protection information</a>, and <a href="https://vercel.com/legal/privacy-policy">Vercel's privacy policy</a>.</p>
+
+      <h2>How long data is kept</h2>
+      <p>Accounts and uploaded documents have no automatic expiration in the app. Documents remain until you delete them or the operator removes them. Successful document deletion removes the active file, indexed text and embeddings, and upload record. Deleting a corpus also removes its corpus record. Recent processing may need to finish before deletion is available.</p>
+      <p>Chat history is not stored. Separately, diagnostic logs or provider records may contain portions of questions or answers. Operational logs, any retained file versions, and backups may remain after document deletion according to cloud service settings.</p>
+
+      <h2>Your rights and controls</h2>
+      <p>You choose what to upload and can remove your documents or private corpora in My Corpora. To request account deletion, access to your personal information, corrections, or help removing data, contact us below. We may need to verify your identity before completing a request.</p>
+      <p>Additional rights, including objection to or restriction of processing, may apply depending on your location. Some information is necessary to provide the service. Signing out or clearing browser storage does not delete your account or documents.</p>
+
+      <h2>Contact us</h2>
+      <p>For questions about this policy or a privacy request, email Steven Liu at <a href="mailto:steven.r.liu20@gmail.com">steven.r.liu20@gmail.com</a>. For account requests, please use your registered email address where possible. We use this correspondence to handle your request and document its resolution.</p>
+      <p>Please do not send passwords or authentication tokens, or post private documents or account information in public GitHub issues.</p>
+
+      <h2>Changes to this policy</h2>
+      <p>We may update this policy as the project changes. Updates will be posted on this page with a revised date. Please review it periodically.</p>
+    </main>
+  </body>
+</html>

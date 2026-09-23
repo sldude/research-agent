@@ -13,6 +13,22 @@ import {
 import './App.css'
 import { MAX_UPLOAD_BYTES, uploadDocument } from './uploadDocument'
 
+function ProjectLinks() {
+  return (
+    <nav className="project-links" aria-label="Project information">
+      <a className="github-link" href="https://github.com/sldude/research-agent" target="_blank" rel="noopener noreferrer">
+        Github
+        <span className="github-link-hint"> (opens in a new tab)</span>
+      </a>
+      <a className="github-link" href="/privacy-policy/index.html" target="_blank" rel="noopener noreferrer">
+        Privacy policy
+        <span className="github-link-hint"> (opens in a new tab)</span>
+      </a>
+      <a className="github-link" href="mailto:steven.r.liu20@gmail.com">Contact</a>
+    </nav>
+  )
+}
+
 type Corpus = {
   id: string
   name: string
@@ -866,6 +882,7 @@ function App() {
   const selectedCorpus = corpora.find((corpus) => corpus.id === selectedCorpusId)
 
   return (
+    <div className={`app-shell ${signedInUser ? 'workspace-shell' : 'login-shell'}`}>
     <main className={signedInUser ? 'app workspace-layout' : 'app login-layout'}>
       {!signedInUser && <div className="login-intro">
         <span className="brand-mark">R<span>·</span>A</span>
@@ -1306,6 +1323,10 @@ function App() {
       </div>}
       </div>
     </main>
+    <footer className="app-footer">
+      <ProjectLinks />
+    </footer>
+    </div>
   )
 }
 

@@ -1,4 +1,7 @@
-.app { min-height: 100vh; }
+.app-shell { display: flex; flex-direction: column; min-height: 100vh; }
+.app { flex: 1; min-height: 0; }
+.app-footer { min-height: 52px; display: flex; align-items: center; justify-content: center; padding: 12px 24px; border-top: 1px solid #dce4ef; background: #edf2f7; }
+.app-footer .github-link { color: #657187; }
 .login-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(370px, .9fr); }
 .login-intro { display: flex; flex-direction: column; justify-content: center; padding: clamp(32px, 7vw, 110px); color: #dbe6ff; background: radial-gradient(circle at 80% 20%, #3159aa 0, transparent 42%), linear-gradient(145deg, #152b57, #0c1a35); }
 .brand-mark { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 14px; background: #fff; color: #234b9d; font-size: 1.1rem; font-weight: 800; letter-spacing: -.1em; }
@@ -24,7 +27,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .auth-card .secondary-button { justify-self: start; border: 0; background: transparent; color: var(--accent); font-size: .9rem; font-weight: 650; }
 .auth-message { margin-top: 20px; color: var(--text); font-size: .88rem; }
 .workspace-layout { display: grid; grid-template-columns: 242px minmax(0, 1fr); }
-.sidebar { position: sticky; top: 0; display: flex; flex-direction: column; height: 100vh; padding: 28px 16px; border-right: 1px solid var(--border); background: white; }
+.sidebar { position: sticky; top: 0; display: flex; flex-direction: column; height: calc(100vh - 52px); padding: 28px 16px; border-right: 1px solid var(--border); background: white; }
 .sidebar-brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; color: var(--text-h); }
 .sidebar-brand .brand-mark { width: 38px; height: 38px; background: #e9efff; font-size: .85rem; }
 .sidebar-label { margin: 48px 12px 14px; color: #8896aa; }
@@ -35,6 +38,11 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .sidebar-account { display: grid; gap: 8px; margin-top: auto; padding: 16px 10px 0; border-top: 1px solid var(--border); font-size: .8rem; }
 .sidebar-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-account button { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); font-weight: 650; }
+.github-link { align-self: flex-start; font-size: .75rem; font-weight: 400; text-decoration: none; }
+.github-link:hover { text-decoration: underline; }
+.github-link:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; border-radius: 3px; }
+.project-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+.github-link-hint { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .workspace-content { display: flex; flex-direction: column; gap: 22px; width: min(100%, 1050px); padding: 48px clamp(24px, 5vw, 72px); }
 .page-header { margin-bottom: 6px; }
 .page-header .eyebrow { margin-bottom: 10px; color: var(--accent); }
