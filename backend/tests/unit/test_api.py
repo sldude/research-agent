@@ -178,7 +178,7 @@ class ApiTests(unittest.TestCase):
 
     @patch("app.main.DynamoRepository")
     def test_list_corpora(self, repository_class: Mock) -> None:
-        repository_class.return_value.count_documents.side_effect = [1234, 0]
+        repository_class.return_value.count_documents.side_effect = AssertionError("List must not count documents")
         repository_class.return_value.list_corpora.return_value = [
             CorpusRecord(
                 id="corpus-1",
@@ -205,23 +205,46 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/api/corpora")
         self.assertEqual(200, response.status_code)
         self.assertEqual(["corpus-1", "corpus-2"], [row["id"] for row in response.json()])
-        self.assertEqual([1234, 0], [row["document_count"] for row in response.json()])
-        self.assertEqual(["corpus-1", "corpus-2"], [
-            call.args[0] for call in repository_class.return_value.count_documents.call_args_list
-        ])
+        self.assertEqual([None, None], [row["document_count"] for row in response.json()])
+        repository_class.return_value.count_documents.assert_not_called()
 
     @patch("app.main.DynamoRepository")
-    def test_create_existing_corpus_returns_current_count(self, repository_class: Mock) -> None:
+    def test_create_existing_corpus_does_not_wait_for_count(self, repository_class: Mock) -> None:
         repository = repository_class.return_value
         repository.get_or_create_corpus.return_value = CorpusRecord(
             id="corpus-1", name="Existing", corpus_type="user_upload",
             owner_id="test-user", created_at=datetime.now(timezone.utc),
         )
-        repository.count_documents.return_value = 3
+        repository.count_documents.side_effect = AssertionError("Create must not count documents")
         response = self.client.post("/api/corpora", json={"name": "Existing"})
         self.assertEqual(200, response.status_code)
-        self.assertEqual(3, response.json()["document_count"])
-        repository.count_documents.assert_called_once_with("corpus-1", "user_upload")
+        self.assertIsNone(response.json()["document_count"])
+        repository.count_documents.assert_not_called()
+
+    @patch("app.main.DynamoRepository")
+    def test_document_count_for_shared_and_owned_corpora(self, repository_class):
+        repository = repository_class.return_value
+        for owner, count in ((None, 1234), ("test-user", 0)):
+            repository.get_corpus.return_value = CorpusRecord(
+                id="c", name="Papers", corpus_type="research_abstract",
+                owner_id=owner, created_at=datetime.now(timezone.utc),
+            )
+            repository.count_documents.return_value = count
+            response = self.client.get("/api/corpora/c/document-count")
+            self.assertEqual(200, response.status_code)
+            self.assertEqual({"document_count": count}, response.json())
+            repository.count_documents.assert_called_with("c", "research_abstract")
+
+    @patch("app.main.DynamoRepository")
+    def test_document_count_does_not_read_missing_or_other_users_corpus(self, repository_class):
+        repository = repository_class.return_value
+        for corpus in (None, CorpusRecord(
+            id="c", name="Private", corpus_type="user_upload", owner_id="someone-else",
+            created_at=datetime.now(timezone.utc),
+        )):
+            repository.get_corpus.return_value = corpus
+            self.assertEqual(404, self.client.get("/api/corpora/c/document-count").status_code)
+        repository.count_documents.assert_not_called()
 
     @patch("app.main.answer_question")
     @patch("app.main.DynamoRepository")

@@ -1,4 +1,4 @@
-import { useEffect, useState, type SubmitEvent} from 'react'
+import { useEffect, useRef, useState, type SubmitEvent} from 'react'
 import {
   confirmResetPassword,
   confirmSignUp,
@@ -18,11 +18,12 @@ type Corpus = {
   name: string
   corpus_type: string
   owner_id: string | null
-  document_count?: number
+  document_count?: number | null
+  count_unavailable?: boolean
 }
 
 function corpusDocumentCount(corpus: Corpus) {
-  if (corpus.document_count === undefined) return 'Document count unavailable'
+  if (corpus.document_count == null) return corpus.count_unavailable ? 'Document count unavailable' : 'Counting documents…'
   return `${corpus.document_count.toLocaleString()} document${corpus.document_count === 1 ? '' : 's'}`
 }
 
@@ -148,6 +149,8 @@ function App() {
   const [authMessage, setAuthMessage] = useState('Checking sign-in status...')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [corpora, setCorpora] = useState<Corpus[]>([])
+  const corporaRequest = useRef<AbortController | null>(null)
+  useEffect(() => () => corporaRequest.current?.abort(), [])
   const [corporaMessage, setCorporaMessage] = useState('Not loaded')
   const [isLoadingCorpora, setIsLoadingCorpora] = useState(false)
   const [selectedCorpusId, setSelectedCorpusId] = useState('')
@@ -456,6 +459,7 @@ function App() {
 
   async function handleSignOut() {
     await signOut()
+    corporaRequest.current?.abort()
     setActiveTab('ask')
     setSignedInUser(null)
     setAuthMessage('Not signed in')
@@ -477,6 +481,9 @@ function App() {
       return
     }
 
+    corporaRequest.current?.abort()
+    const controller = new AbortController()
+    corporaRequest.current = controller
     setIsLoadingCorpora(true)
     setCorporaMessage('Loading...')
     try {
@@ -488,23 +495,54 @@ function App() {
 
       const response = await fetch(`${apiUrl}/api/corpora`, {
         headers: { Authorization: `Bearer ${accessToken}` },
+        signal: controller.signal,
       })
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`)
       }
 
       const result: Corpus[] = await response.json()
+      if (controller.signal.aborted) return
       setCorpora(result)
       setSelectedCorpusId((current) => current || result[0]?.id || '')
       setDocumentCorpusId((current) =>
         current || result.find((corpus) => corpus.corpus_type === 'user_upload')?.id || '',
       )
       setCorporaMessage(`Loaded ${result.length} corpora`)
+      // Counts must never hold up corpus selection. Limit concurrency and stop
+      // stale requests on reload/sign-out; document-list updates take priority.
+      const pending = result.filter((corpus) => corpus.document_count == null)
+      async function loadCounts() {
+        while (pending.length && !controller.signal.aborted) {
+          const corpus = pending.shift()!
+          try {
+            const response = await fetch(`${apiUrl}/api/corpora/${encodeURIComponent(corpus.id)}/document-count`, {
+              headers: { Authorization: `Bearer ${accessToken}` },
+              signal: controller.signal,
+            })
+            if (!response.ok) throw new Error('Count unavailable')
+            const body = await response.json()
+            if (!Number.isSafeInteger(body.document_count) || body.document_count < 0) throw new Error('Invalid count')
+            if (controller.signal.aborted) return
+            setCorpora((current) => current.map((item) =>
+              item.id === corpus.id && item.document_count == null
+                ? { ...item, document_count: body.document_count } : item,
+            ))
+          } catch {
+            if (controller.signal.aborted) return
+            setCorpora((current) => current.map((item) =>
+              item.id === corpus.id ? { ...item, count_unavailable: true } : item,
+            ))
+          }
+        }
+      }
+      void Promise.all([loadCounts(), loadCounts()])
     } catch (error) {
+      if (controller.signal.aborted) return
       setCorpora([])
       setCorporaMessage(error instanceof Error ? error.message : 'Request failed')
     } finally {
-      setIsLoadingCorpora(false)
+      if (!controller.signal.aborted) setIsLoadingCorpora(false)
     }
   }
 

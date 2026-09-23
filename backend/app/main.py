@@ -74,11 +74,20 @@ def list_corpora(user_id: str = Depends(get_current_user_id)) -> list[CorpusResp
             name=corpus.name,
             corpus_type=corpus.corpus_type,
             owner_id=corpus.owner_id,
-            document_count=repository.count_documents(corpus.id, corpus.corpus_type),
         )
         for corpus in repository.list_corpora()
         if corpus.owner_id is None or corpus.owner_id == user_id
     ]
+
+
+@app.get("/api/corpora/{corpus_id}/document-count")
+def get_corpus_document_count(corpus_id: str, user_id: str = Depends(get_current_user_id)):
+    """Load potentially expensive counts independently of the corpus list."""
+    repository = DynamoRepository()
+    corpus = repository.get_corpus(corpus_id)
+    if corpus is None or (corpus.owner_id is not None and corpus.owner_id != user_id):
+        raise HTTPException(status_code=404, detail="Corpus not found.")
+    return {"document_count": repository.count_documents(corpus.id, corpus.corpus_type)}
 
 
 @app.post("/api/rag/answer", response_model=RagAnswer)
@@ -384,7 +393,6 @@ def create_corpus(
         name=corpus.name,
         corpus_type=corpus.corpus_type,
         owner_id=corpus.owner_id,
-        document_count=repository.count_documents(corpus.id, corpus.corpus_type),
     )
 
 # get listed documents within corpus belonging to user

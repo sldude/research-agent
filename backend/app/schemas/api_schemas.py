@@ -128,7 +128,7 @@ class CorpusResponse(BaseModel):
     name: str
     corpus_type: str
     owner_id: str | None
-    document_count: int = Field(default=0, ge=0)
+    document_count: int | None = Field(default=None, ge=0)
 
 
 class RagQuestionRequest(BaseModel):
