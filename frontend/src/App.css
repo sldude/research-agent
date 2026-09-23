@@ -131,4 +131,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .answer-card li span { display: block; font-size: .82rem; }
 @media (max-width: 760px) { .login-layout { grid-template-columns: 1fr; } .login-intro { padding: 36px 24px; } .login-intro .eyebrow { margin-top: 30px; } .intro-features { display: none; } .login-content { padding: 24px; } .workspace-layout { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; padding: 14px 20px; } .sidebar-label { display: none; } .workspace-tabs { display: flex; margin-top: 12px; } .workspace-tabs button { width: auto; } .sidebar-account { position: absolute; right: 20px; top: 15px; margin: 0; padding: 0; border: 0; max-width: 40%; } .sidebar-account span { display: none; } .workspace-content { padding: 28px 20px; } .corpora-heading { align-items: flex-start; flex-direction: column; } .add-files-form { grid-template-columns: 1fr; } .add-files-form label, .add-files-form p { grid-column: auto; } .manage-corpora-layout { grid-template-columns: 1fr; } .corpus-list-panel { grid-row: 1; padding: 0 0 20px; border: 0; border-bottom: 1px solid var(--border); } }
 .auth-loading { display: grid; place-items: center; min-height: 100vh; color: var(--text-h); font-weight: 650; }
+.account-settings { max-width: 720px; }
+.account-settings form { display: grid; gap: 12px; justify-items: start; }
+.account-settings input { width: min(100%, 320px); box-sizing: border-box; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+.delete-account-button { padding: 12px 18px; border: 1px solid #a72e3b; border-radius: 8px; background: #a72e3b; color: white; font-weight: 650; }
+.delete-account-button:disabled { opacity: .5; cursor: not-allowed; }
 

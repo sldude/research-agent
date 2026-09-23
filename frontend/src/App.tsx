@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type SubmitEvent} from 'react'
 import {
   confirmResetPassword,
   confirmSignUp,
+  deleteUser,
   fetchAuthSession,
   getCurrentUser,
   resendSignUpCode,
@@ -12,6 +13,7 @@ import {
 } from 'aws-amplify/auth'
 import './App.css'
 import { MAX_UPLOAD_BYTES, uploadDocument } from './uploadDocument'
+import { deleteAccount } from './deleteAccount'
 
 function ProjectLinks() {
   return (
@@ -88,7 +90,7 @@ type AuthMode =
   | 'resetPassword'
   | 'confirmResetPassword'
 
-type WorkspaceTab = 'ask' | 'manage'
+type WorkspaceTab = 'ask' | 'manage' | 'settings'
 type CorporaTab = 'manage' | 'create'
 
 function fileKind(filename: string) {
@@ -152,6 +154,9 @@ function LocalFileTile({ file, onRemove, onOpen }: {
 
 function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('ask')
+  const [deleteConfirmation, setDeleteConfirmation] = useState('')
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
+  const [accountMessage, setAccountMessage] = useState('')
   const [corporaTab, setCorporaTab] = useState<CorporaTab>('manage')
   const [question, setQuestion] = useState('')
   const [email, setEmail] = useState('')
@@ -475,7 +480,21 @@ function App() {
 
   async function handleSignOut() {
     await signOut()
+    clearAccountState()
+  }
+
+  function clearAccountState() {
     corporaRequest.current?.abort()
+    closePreview()
+    setUploadTracking(null)
+    setDocumentFiles([])
+    setQuestion('')
+    setPassword('')
+    setConfirmPassword('')
+    setNewPassword('')
+    setConfirmationCode('')
+    setDeleteConfirmation('')
+    setAccountMessage('')
     setActiveTab('ask')
     setSignedInUser(null)
     setAuthMessage('Not signed in')
@@ -488,6 +507,40 @@ function App() {
     setPendingDeletionIds([])
     setRagAnswer(null)
     setRagMessage('')
+  }
+
+  async function handleDeleteAccount(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (deleteConfirmation !== 'DELETE' || isDeletingAccount || isUploading || isAsking || deletingCorpusId || deletingDocumentId) return
+    setIsDeletingAccount(true)
+    setAccountMessage('Removing your corpora and uploads, then deleting your account. Keep this page open.')
+    corporaRequest.current?.abort()
+    setUploadTracking(null)
+    setRagAnswer(null)
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
+      if (!apiUrl) throw new Error('API URL is not configured.')
+      const user = await getCurrentUser()
+      await deleteAccount({
+        apiUrl,
+        userId: user.userId,
+        getToken: async () => {
+          const session = await fetchAuthSession()
+          const token = session.tokens?.accessToken.toString()
+          if (!token) throw new Error('Sign in again before deleting your account.')
+          return token
+        },
+        removeUser: deleteUser,
+      })
+      clearAccountState()
+      setAuthMode('signIn')
+      setAuthMessage('Your account has been deleted.')
+    } catch (error) {
+      setAccountMessage(`${error instanceof Error ? error.message : 'Account deletion failed.'} Deletion did not complete. Some corpora may already have been removed. You can retry; removed data cannot be restored.`)
+      void loadCorpora()
+    } finally {
+      setIsDeletingAccount(false)
+    }
   }
 
   async function loadCorpora() {
@@ -899,15 +952,32 @@ function App() {
       {signedInUser && <aside className="sidebar">
         <div className="sidebar-brand"><span className="brand-mark">R<span>·</span>A</span><strong>Research Agent</strong></div>
         <p className="sidebar-label">WORKSPACE</p>
-        <nav className="workspace-tabs" aria-label="Workspace pages">
+        <nav className="workspace-tabs" aria-label="Workspace pages" inert={isDeletingAccount}>
           <button type="button" className={activeTab === 'ask' ? 'active' : ''} aria-current={activeTab === 'ask' ? 'page' : undefined} onClick={() => setActiveTab('ask')}>Ask</button>
           <button type="button" className={activeTab === 'manage' ? 'active' : ''} aria-current={activeTab === 'manage' ? 'page' : undefined} onClick={() => setActiveTab('manage')}>My Corpora</button>
+          <button type="button" className={activeTab === 'settings' ? 'active' : ''} aria-current={activeTab === 'settings' ? 'page' : undefined} onClick={() => setActiveTab('settings')}>Settings</button>
         </nav>
-        <div className="sidebar-account"><span title={signedInUser}>{signedInUser}</span><button type="button" onClick={handleSignOut}>Sign out</button></div>
+        <div className="sidebar-account"><span title={signedInUser}>{signedInUser}</span><button type="button" disabled={isDeletingAccount} onClick={handleSignOut}>Sign out</button></div>
       </aside>}
 
       <div className={signedInUser ? 'workspace-content' : 'login-content'}>
-      {signedInUser && <header className="page-header"><p className="eyebrow">RESEARCH WORKSPACE</p><h1>{activeTab === 'ask' ? 'Ask Research Agent' : 'My Corpora'}</h1><p>{activeTab === 'ask' ? 'An arXiv corpus is available for searching by default. Select a corpus from Your Corpora, then ask about findings, methods, themes, or other information contained in it. Click “Ask” to run a RAG semantic search and generate an answer grounded in the most relevant sources. To create a corpus from your own uploaded documents, click “My Corpora” in the left sidebar, where you can also manage and edit your corpora.' : 'Organize and explore your research documents and manage the corpora used by Research Agent.'}</p></header>}
+      {signedInUser && activeTab === 'settings' && <>
+        <header className="page-header"><p className="eyebrow">ACCOUNT</p><h1>Settings</h1><p>Manage your Research Agent account.</p></header>
+        <section className="corpora-card account-settings" aria-labelledby="delete-account-heading">
+          <h2 id="delete-account-heading">Delete account</h2>
+          <p>Signed in as <strong>{signedInUser}</strong></p>
+          <p>This permanently deletes your account, private corpora, and uploaded documents. This cannot be undone.</p>
+          <p>Finish any uploads first and close other Research Agent tabs. Keep this page open until deletion completes. Logs, backups, and retained file versions may remain as described in our <a href="/privacy-policy/index.html" target="_blank" rel="noopener noreferrer">privacy policy</a>.</p>
+          <form onSubmit={handleDeleteAccount}>
+            <label htmlFor="delete-account-confirmation">Type DELETE to confirm</label>
+            <input id="delete-account-confirmation" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off" spellCheck={false} disabled={isDeletingAccount} />
+            <button className="delete-account-button" type="submit" disabled={deleteConfirmation !== 'DELETE' || isDeletingAccount || isUploading || isAsking || !!deletingCorpusId || !!deletingDocumentId}>{isDeletingAccount ? 'Deleting account…' : 'Permanently delete account'}</button>
+          </form>
+          {(isUploading || isAsking || !!deletingCorpusId || !!deletingDocumentId) && <p role="status">Wait for your current operation to finish before deleting your account.</p>}
+          <p role="status" aria-live="polite">{accountMessage}</p>
+        </section>
+      </>}
+      {signedInUser && activeTab !== 'settings' && <header className="page-header"><p className="eyebrow">RESEARCH WORKSPACE</p><h1>{activeTab === 'ask' ? 'Ask Research Agent' : 'My Corpora'}</h1><p>{activeTab === 'ask' ? 'An arXiv corpus is available for searching by default. Select a corpus from Your Corpora, then ask about findings, methods, themes, or other information contained in it. Click “Ask” to run a RAG semantic search and generate an answer grounded in the most relevant sources. To create a corpus from your own uploaded documents, click “My Corpora” in the left sidebar, where you can also manage and edit your corpora.' : 'Organize and explore your research documents and manage the corpora used by Research Agent.'}</p></header>}
       {signedInUser && activeTab === 'manage' && <nav className="corpora-subtabs" aria-label="Corpus management">
         <button type="button" className={corporaTab === 'manage' ? 'active' : ''} onClick={() => setCorporaTab('manage')}>Manage Corpora</button>
         <button type="button" className={corporaTab === 'create' ? 'active' : ''} onClick={() => setCorporaTab('create')}>Create Corpus</button>
