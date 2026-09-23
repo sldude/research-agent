@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.clients.generation import GenerationError
+from app.clients.generation import GenerationError, GenerationTruncatedError
 from app.schemas.api_schemas import RagAnswer, RetrievedChunk
 from app.services.rag_service import (
     answer_question, build_context, create_rag_sources, is_corpus_overview,
@@ -168,6 +168,30 @@ class RagTests(unittest.TestCase):
         result = answer_question(corpus_id="c", question="Explain")
         self.assertEqual("Claim [1].", result.answer)
         self.assertEqual(2, generate.call_count)
+        self.assertGreater(generate.call_args_list[1].kwargs["max_tokens"],
+                           generate.call_args_list[0].kwargs["max_tokens"])
+
+    def test_complete_fenced_json_still_validates_references(self):
+        sources = create_rag_sources([chunk("a")])
+        result = resolve_references("```json\n" + generated("Claim [1].") + "\n```", sources, "Explain")
+        self.assertEqual("Claim [1].", result.answer)
+        with self.assertRaises(ValueError):
+            resolve_references("```json\n" + generated("Claim [99].") + "\n```", sources, "Explain")
+
+    @patch("app.services.rag_service.retrieve_similar_chunks", return_value=[chunk("a")])
+    @patch("app.services.rag_service.generate_text")
+    def test_truncated_response_retries_with_larger_budget(self, generate, retrieve):
+        generate.side_effect = [GenerationTruncatedError("Truncated"), generated("Claim [1].")]
+        result = answer_question(corpus_id="c", question="Explain", max_tokens=600)
+        self.assertEqual("Claim [1].", result.answer)
+        self.assertEqual([600, 1200], [call.kwargs["max_tokens"] for call in generate.call_args_list])
+
+    @patch("app.services.rag_service.retrieve_similar_chunks", return_value=[chunk("a")])
+    @patch("app.services.rag_service.generate_text")
+    def test_partial_json_retries_without_serving_partial_answer(self, generate, retrieve):
+        generate.side_effect = ['{"answer": "Unfinished', generated("Claim [1].")]
+        result = answer_question(corpus_id="c", question="Explain")
+        self.assertEqual("Claim [1].", result.answer)
 
     @patch("app.services.rag_service.retrieve_similar_chunks", return_value=[chunk("a")])
     @patch("app.services.rag_service.generate_text", return_value=generated("Claim [99]."))

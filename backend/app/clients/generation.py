@@ -24,6 +24,10 @@ class GenerationError(RuntimeError):
     """Raised when Bedrock cannot generate a usable text response."""
 
 
+class GenerationTruncatedError(GenerationError):
+    """The response hit its output limit before completing."""
+
+
 @lru_cache(maxsize=1)
 def create_bedrock_client():
     """Create one reusable Bedrock Runtime client on the first model call."""
@@ -79,6 +83,9 @@ def generate_text(
         raise GenerationError(
             f"Bedrock generation failed for {GENERATION_MODEL_ID}: {exc}"
         ) from exc
+
+    if response.get("stopReason") == "max_tokens":
+        raise GenerationTruncatedError("Bedrock response reached its output token limit")
 
     try:
         content_blocks = response["output"]["message"]["content"]

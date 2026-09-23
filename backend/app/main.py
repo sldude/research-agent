@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from mangum import Mangum
 
 from app.database.repository import DynamoRepository
+from app.clients.generation import GenerationError
 from app.schemas.api_schemas import CorpusResponse, RagAnswer, RagQuestionRequest, CreateCorpusRequest, DocumentUploadRequest
 from app.services.rag_service import answer_question
 from app.upload_limits import MAX_UPLOAD_BYTES, UPLOAD_POST_EXPIRES_SECONDS
@@ -100,13 +101,20 @@ def generate_rag_answer(
             detail="You do not have access to this corpus.",
         )
 
-    return answer_question(
-        corpus_id=request.corpus_id,
-        question=request.question,
-        limit=request.limit,
-        max_tokens=request.max_tokens,
-        repository=repository,
-    )
+    try:
+        return answer_question(
+            corpus_id=request.corpus_id,
+            question=request.question,
+            limit=request.limit,
+            max_tokens=request.max_tokens,
+            repository=repository,
+        )
+    except GenerationError:
+        logger.exception("Answer generation failed for corpus %s", request.corpus_id)
+        raise HTTPException(
+            status_code=502,
+            detail="The answer could not be completed and validated. Please try again or ask a narrower question.",
+        ) from None
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 

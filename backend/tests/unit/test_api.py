@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.database.database_tables import CorpusRecord
 from app.main import app, get_current_user_id
 from app.schemas.api_schemas import RagAnswer
+from app.clients.generation import GenerationError
 
 
 class ApiTests(unittest.TestCase):
@@ -243,6 +244,21 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(200, response.status_code)
         self.assertEqual("A grounded answer.", response.json()["answer"])
+
+    @patch("app.main.answer_question", side_effect=GenerationError("Internal provider details"))
+    @patch("app.main.DynamoRepository")
+    def test_generation_failure_returns_safe_actionable_error(self, repository_class, answer):
+        repository_class.return_value.get_corpus.return_value = CorpusRecord(
+            id="corpus-1", name="Papers", corpus_type="research_abstract",
+            owner_id=None, created_at=datetime.now(timezone.utc),
+        )
+        with self.assertLogs("app.main", level="ERROR"):
+            response = self.client.post("/api/rag/answer", json={
+                "corpus_id": "corpus-1", "question": "Explain",
+            })
+        self.assertEqual(502, response.status_code)
+        self.assertIn("Please try again", response.json()["detail"])
+        self.assertNotIn("Internal provider details", response.text)
 
     @patch("app.main.DynamoRepository")
     def test_missing_corpus_returns_404(self, repository_class: Mock) -> None:

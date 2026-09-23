@@ -540,7 +540,10 @@ function App() {
         }),
       })
       if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`)
+        const body = await response.json().catch(() => null)
+        throw new Error(typeof body?.detail === 'string'
+          ? body.detail
+          : `Answer request failed with status ${response.status}`)
       }
 
       const result: RagAnswer = await response.json()
