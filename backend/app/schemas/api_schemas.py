@@ -5,8 +5,10 @@ indexes; the provisioning script is responsible for infrastructure.
 """
 
 from datetime import date
+import re
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ArxivPaper(BaseModel):
@@ -56,19 +58,67 @@ class RetrievedChunk(BaseModel):
 class RagSource(BaseModel):
     """One database-backed source supplied to the generation model to answer post similarity retrieval."""
 
-    number: int
+    number: int = Field(strict=True, gt=0)
     document_id: str
     external_id: str | None
     title: str
     source_url: str | None
     distance: float | None
+    reference_type: Literal["cited", "additional"] = "cited"
+
+
+def citation_numbers(answer: str) -> set[int]:
+    """Read the supported [n] notation, rejecting ambiguous numeric brackets."""
+    numbers = set()
+    for value in re.findall(r"\[([^\[\]\n]+)\]", answer):
+        if re.match(r"\s*\d", value):
+            if not re.fullmatch(r"[1-9][0-9]*", value):
+                raise ValueError("Citations must use separate positive [n] source IDs")
+            numbers.add(int(value))
+    return numbers
+
+
+class GeneratedRagAnswer(BaseModel):
+    """Model-controlled prose and selections; metadata comes from storage only."""
+
+    model_config = ConfigDict(extra="forbid")
+    answer: str = Field(min_length=1)
+    requested_source_count: int | None = Field(strict=True, gt=0)
+    additional_source_ids: list[Annotated[int, Field(strict=True, gt=0)]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_selections(self):
+        ids = self.additional_source_ids
+        if any(type(number) is not int or number <= 0 for number in ids):
+            raise ValueError("Additional source IDs must be positive integers")
+        if len(ids) != len(set(ids)):
+            raise ValueError("Duplicate additional source IDs")
+        cited = citation_numbers(self.answer)
+        if cited.intersection(ids):
+            raise ValueError("Cited sources cannot also be additional sources")
+        if self.requested_source_count is None and ids:
+            raise ValueError("Additional sources require a source-count request")
+        if self.requested_source_count is not None and len(cited) + len(ids) > self.requested_source_count:
+            raise ValueError("Source list exceeds the requested count")
+        return self
 
 class RagAnswer(BaseModel):
-    """A generated answer with the sources supplied to the model."""
+    """An answer with cited sources and explicitly requested relevant extras."""
 
     question: str
     answer: str
     sources: list[RagSource] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_references(self):
+        numbers = [source.number for source in self.sources]
+        documents = [source.document_id for source in self.sources]
+        if len(numbers) != len(set(numbers)) or len(documents) != len(set(documents)):
+            raise ValueError("Duplicate source IDs or documents")
+        cited = {source.number for source in self.sources if source.reference_type == "cited"}
+        if citation_numbers(self.answer) != cited:
+            raise ValueError("Inline citations must match the cited source list")
+        return self
 
 
 class CorpusResponse(BaseModel):

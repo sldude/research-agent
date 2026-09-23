@@ -44,6 +44,7 @@ type OpenPreview = DocumentPreview & { name: string; revokeOnClose?: boolean }
 
 type RagSource = {
   number: number
+  reference_type: 'cited' | 'additional'
   document_id: string
   external_id: string | null
   title: string
@@ -1216,21 +1217,30 @@ function App() {
           <h2>Answer</h2>
           <p className="answer-text">{ragAnswer.answer}</p>
 
-          <h3>Sources</h3>
-          <ol>
-            {ragAnswer.sources.map((source) => (
-              <li key={`${source.number}-${source.document_id}`}>
-                {source.source_url ? (
-                  <a href={source.source_url} target="_blank" rel="noreferrer">
-                    {source.title}
-                  </a>
-                ) : (
-                  source.title
-                )}
-                <span>Distance: {source.distance === null ? 'Overview' : source.distance.toFixed(4)}</span>
-              </li>
-            ))}
-          </ol>
+          {(['cited', 'additional'] as const).map((referenceType) => {
+            const sources = ragAnswer.sources.filter((source) =>
+              (source.reference_type ?? 'cited') === referenceType)
+            if (!sources.length) return null
+            return (
+              <div key={referenceType}>
+                <h3>{referenceType === 'cited' ? 'Sources' : 'Additional relevant sources'}</h3>
+                <ol>
+                  {sources.map((source) => (
+                    <li value={source.number} key={`${source.number}-${source.document_id}`}>
+                      {source.source_url ? (
+                        <a href={source.source_url} target="_blank" rel="noreferrer">
+                          {source.title}
+                        </a>
+                      ) : (
+                        source.title
+                      )}
+                      <span>Distance: {source.distance === null ? 'Overview' : source.distance.toFixed(4)}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )
+          })}
         </section>
       )}
       {openPreview && <div className="preview-backdrop" role="presentation" onMouseDown={closePreview}>

@@ -1,12 +1,15 @@
 """Offline regression tests for document citations and corpus coverage."""
 
 import unittest
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from app.schemas.api_schemas import RetrievedChunk
+from app.clients.generation import GenerationError
+from app.schemas.api_schemas import RagAnswer, RetrievedChunk
 from app.services.rag_service import (
     answer_question, build_context, create_rag_sources, is_corpus_overview,
+    resolve_references,
 )
 from app.database.repository import DynamoRepository
 
@@ -17,6 +20,11 @@ def chunk(document, index=0):
         external_id=None, title=document, content=f"Evidence {document}-{index}",
         source_url=None, distance=0.1,
     )
+
+
+def generated(answer, count=None, additional=None):
+    return json.dumps({"answer": answer, "requested_source_count": count,
+                       "additional_source_ids": additional or []})
 
 
 class RagTests(unittest.TestCase):
@@ -44,7 +52,7 @@ class RagTests(unittest.TestCase):
                          "What is attention?", "Summarize the corpus evidence about RAG"):
             self.assertFalse(is_corpus_overview(question), question)
 
-    @patch("app.services.rag_service.generate_text", return_value="Overview [1][2][3][4][5]")
+    @patch("app.services.rag_service.generate_text", return_value=generated("Overview [1][2][3][4][5]"))
     @patch("app.services.rag_service.retrieve_similar_chunks")
     def test_overview_includes_five_documents_independent_of_search_limit(self, retrieve, generate):
         repository = Mock()
@@ -59,17 +67,18 @@ class RagTests(unittest.TestCase):
         for i in range(5):
             self.assertIn(f"Distinct subject {i}", generate.call_args.args[0])
         self.assertTrue(all(s.distance is None for s in result.sources))
-        self.assertIn("opening excerpts", result.answer)
+        self.assertEqual("Overview [1][2][3][4][5]", result.answer)
 
-    @patch("app.services.rag_service.generate_text", return_value="Topics [1]")
-    def test_truncation_is_disclosed_independently_of_model(self, generate):
+    @patch("app.services.rag_service.generate_text", return_value=generated("Topics [1]"))
+    def test_truncation_is_internal_without_appended_coverage_note(self, generate):
         repository = Mock()
         repository.overview_documents.return_value = ([SimpleNamespace(
             chunk_id="a", id="a", external_id=None, title="A", abstract=None,
             content="A subject", source_url=None,
         )], True)
         result = answer_question(corpus_id="c", question="What is in the corpus?", repository=repository)
-        self.assertIn("Partial overview", result.answer)
+        self.assertEqual("Topics [1]", result.answer)
+        self.assertIn("More documents exist: True", generate.call_args.args[0])
 
     @patch("app.services.rag_service.generate_text")
     def test_empty_overview_skips_generation(self, generate):
@@ -97,12 +106,72 @@ class RagTests(unittest.TestCase):
         client.query.return_value = {"Items": []}
         self.assertEqual(([], False), DynamoRepository(client).overview_documents("c"))
 
-    @patch("app.services.rag_service.generate_text", return_value="Topic A [1]")
-    def test_small_inventory_mentions_document_omitted_by_model(self, generate):
+    @patch("app.services.rag_service.generate_text", return_value=generated("Topic A [1]"))
+    def test_small_inventory_does_not_append_uncited_documents(self, generate):
         repository = Mock()
         repository.overview_documents.return_value = ([SimpleNamespace(
             chunk_id=title, id=title, external_id=None, title=title,
             abstract=None, content="Evidence", source_url=None,
         ) for title in ("A", "B")], False)
         result = answer_question(corpus_id="c", question="What is in the corpus?", repository=repository)
-        self.assertIn("B [2]", result.answer)
+        self.assertEqual("Topic A [1]", result.answer)
+        self.assertEqual(["A"], [s.document_id for s in result.sources])
+
+    def test_default_sources_match_citations_and_preserve_original_metadata(self):
+        records = [chunk("a"), chunk("b"), chunk("b", 1), chunk("c")]
+        records[1].title = "Original title"
+        records[1].source_url = "https://example.org/paper"
+        result = resolve_references(generated("Two related sentences. Same evidence [2]."),
+                                    create_rag_sources(records), "Explain")
+        self.assertEqual([2], [s.number for s in result.sources])
+        self.assertEqual("Original title", result.sources[0].title)
+        self.assertEqual("https://example.org/paper", result.sources[0].source_url)
+        self.assertEqual("cited", result.sources[0].reference_type)
+
+    def test_requested_sources_include_only_selected_relevant_extras(self):
+        sources = create_rag_sources([chunk("a"), chunk("b"), chunk("irrelevant")])
+        result = resolve_references(generated("Claim [1].", 5, [2]), sources,
+                                    "Explain with five sources")
+        self.assertEqual([1, 2], [s.number for s in result.sources])
+        self.assertEqual(["cited", "additional"], [s.reference_type for s in result.sources])
+
+    def test_unsupported_answer_has_no_sources(self):
+        result = resolve_references(generated("Add relevant documents to this corpus."),
+                                    create_rag_sources([chunk("a")]), "Explain")
+        self.assertEqual([], result.sources)
+
+    def test_invalid_model_selections_are_rejected(self):
+        sources = create_rag_sources([chunk("a"), chunk("b")])
+        for raw in (
+            generated("Claim [99]."), generated("Claim [0]."),
+            generated("Claim [1, 2]."), generated("Claim [1].", 3, [99]),
+            generated("Claim [1].", 3, [2, 2]), generated("Claim [1].", 3, [1]),
+            generated("Claim [1].", None, [2]), generated("Claim [1][2].", 1),
+            generated("Claim [1].", 2, [True]), generated("Claim [1].", 2, ["2"]),
+            '{"answer": "Claim [1].", "title": "Invented"}', "not JSON",
+        ):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                resolve_references(raw, sources, "Explain")
+
+    def test_api_schema_rejects_inconsistent_or_duplicate_reference_lists(self):
+        a, b = create_rag_sources([chunk("a"), chunk("b")])
+        for answer, sources in (("Claim [1].", []), ("Claim [1].", [a, b]),
+                                ("Claim [1].", [a, a]),
+                                ("Claim [1][2].", [a, b.model_copy(update={"document_id": "a"})])):
+            with self.subTest(sources=sources), self.assertRaises(ValueError):
+                RagAnswer(question="Explain", answer=answer, sources=sources)
+
+    @patch("app.services.rag_service.retrieve_similar_chunks", return_value=[chunk("a")])
+    @patch("app.services.rag_service.generate_text")
+    def test_invalid_generation_retries_once(self, generate, retrieve):
+        generate.side_effect = [generated("Claim [99]."), generated("Claim [1].")]
+        result = answer_question(corpus_id="c", question="Explain")
+        self.assertEqual("Claim [1].", result.answer)
+        self.assertEqual(2, generate.call_count)
+
+    @patch("app.services.rag_service.retrieve_similar_chunks", return_value=[chunk("a")])
+    @patch("app.services.rag_service.generate_text", return_value=generated("Claim [99]."))
+    def test_repeated_invalid_generation_fails_without_serving_bad_citations(self, generate, retrieve):
+        with self.assertRaises(GenerationError):
+            answer_question(corpus_id="c", question="Explain")
+        self.assertEqual(2, generate.call_count)
