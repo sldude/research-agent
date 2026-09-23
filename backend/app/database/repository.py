@@ -300,6 +300,61 @@ class DynamoRepository:
         )
         return _document_from_item(item)
 
+    def overview_documents(self, corpus_id: str, limit: int = 100) -> tuple[list[DocumentRecord], bool]:
+        """Read one opening excerpt per document, skipping its remaining chunks.
+
+        The sort key is document_id#chunk:NNNNNN. Seeking past each document
+        avoids scanning a large document's chunks or transferring embeddings.
+        An extra document establishes whether this bounded overview is partial.
+        """
+        fields = ("corpus_id chunk_id document_id source external_id title abstract authors "
+                  "publication_date source_url license_url content embedding_model "
+                  "embedding_dimensions created_at categories updated_date").split()
+        records = []
+        cursor = None
+        while len(records) <= limit:
+            names = {f"#f{i}": field for i, field in enumerate(fields)}
+            names["#corpus"] = "corpus_id"
+            values = {":corpus": _string(corpus_id)}
+            condition = "#corpus = :corpus"
+            if cursor is not None:
+                names["#sort"] = "chunk_id"
+                values[":after"] = _string(cursor)
+                condition += " AND #sort > :after"
+            response = self.client.query(
+                TableName=DYNAMODB_CHUNKS_TABLE,
+                KeyConditionExpression=condition,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+                ProjectionExpression=", ".join(f"#f{i}" for i in range(len(fields))),
+                Limit=1,
+                ConsistentRead=True,
+            )
+            items = response.get("Items", [])
+            if not items:
+                break
+            record = _document_from_item(items[0])
+            records.append(record)
+            cursor = record.id + "#chunk:~"
+        visible = self._searchable_documents(records[:limit], corpus_id)
+        return visible, len(records) > limit
+
+    def _searchable_documents(self, records: list[DocumentRecord], corpus_id: str) -> list[DocumentRecord]:
+        """Exclude orphaned and unfinished uploads, including historical leftovers."""
+        allowed = {}
+        visible = []
+        for record in records:
+            if record.source != "upload":
+                visible.append(record)
+                continue
+            upload_id = record.external_id
+            if upload_id not in allowed:
+                status = self.get_document_status(corpus_id=corpus_id, document_id=upload_id) if upload_id else None
+                allowed[upload_id] = status is not None and status["status"] == "ready"
+            if allowed[upload_id]:
+                visible.append(record)
+        return visible
+
     def search_documents(
         self,
         *,
@@ -350,7 +405,10 @@ class DynamoRepository:
             chunk_id = result["Item"]["chunk_id"]["S"]
             if item := by_key.get(chunk_id):
                 ranked.append((_document_from_item(item), float(result["Score"])))
-        return ranked
+        visible_ids = {record.id for record in self._searchable_documents(
+            [record for record, _ in ranked], corpus_id
+        )}
+        return [(record, score) for record, score in ranked if record.id in visible_ids]
 
     def delete_corpus(self, corpus_id: str) -> None:
         """Delete one corpus, all indexed chunks, and document-status records."""
@@ -726,15 +784,16 @@ class DynamoRepository:
 
     def delete_document(self, *, corpus_id: str, document_id: str) -> None:
         """Delete every indexed chunk and the status record for one document."""
+        indexed_id = self.document_id("upload", document_id)
         request = {
             "TableName": DYNAMODB_CHUNKS_TABLE,
-            "KeyConditionExpression": "corpus_id = :corpus_id",
-            "FilterExpression": "document_id = :document_id",
+            "KeyConditionExpression": "corpus_id = :corpus_id AND begins_with(chunk_id, :prefix)",
             "ExpressionAttributeValues": {
                 ":corpus_id": _string(corpus_id),
-                ":document_id": _string(document_id),
+                ":prefix": _string(indexed_id + "#chunk:"),
             },
             "ProjectionExpression": "corpus_id, chunk_id",
+            "ConsistentRead": True,
         }
         keys = []
         while True:
@@ -756,9 +815,15 @@ class DynamoRepository:
             request["ExclusiveStartKey"] = last_key
 
         for start in range(0, len(keys), 25):
-            self.client.batch_write_item(
-                RequestItems={DYNAMODB_CHUNKS_TABLE: keys[start : start + 25]}
-            )
+            pending = {DYNAMODB_CHUNKS_TABLE: keys[start : start + 25]}
+            for attempt in range(6):
+                result = self.client.batch_write_item(RequestItems=pending)
+                pending = result.get("UnprocessedItems", {})
+                if not pending:
+                    break
+                if attempt == 5:
+                    raise RuntimeError("Chunk deletion incomplete; retry document deletion.")
+                time.sleep(min(0.1 * 2 ** attempt, 2))
         self.client.delete_item(
             TableName=DYNAMODB_DOCUMENT_STATUS_TABLE,
             Key={

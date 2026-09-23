@@ -48,7 +48,7 @@ type RagSource = {
   external_id: string | null
   title: string
   source_url: string | null
-  distance: number
+  distance: number | null
 }
 
 type RagAnswer = {
@@ -690,6 +690,8 @@ function App() {
           throw new Error(typeof body?.detail === 'string' ? body.detail : `Delete failed (${response.status}).`)
         }
         setPendingDeletionIds((current) => current.filter((id) => id !== documentId))
+        setRagAnswer(null)
+        setRagMessage('')
       }
       setDeletingDocumentId('')
 
@@ -1225,7 +1227,7 @@ function App() {
                 ) : (
                   source.title
                 )}
-                <span>Distance: {source.distance.toFixed(4)}</span>
+                <span>Distance: {source.distance === null ? 'Overview' : source.distance.toFixed(4)}</span>
               </li>
             ))}
           </ol>

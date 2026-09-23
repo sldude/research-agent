@@ -125,6 +125,7 @@ class DynamoRepositoryTests(unittest.TestCase):
 
     def test_delete_document_removes_all_matching_chunks_and_status(self) -> None:
         client = Mock()
+        client.batch_write_item.return_value = {}
         client.query.side_effect = [
             {
                 "Items": [{"corpus_id": {"S": "corpus-1"}, "chunk_id": {"S": "a"}}],
@@ -138,9 +139,65 @@ class DynamoRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(2, client.query.call_count)
+        query = client.query.call_args_list[0].kwargs
+        expected_id = DynamoRepository.document_id("upload", "doc-1")
+        self.assertEqual({"S": expected_id + "#chunk:"}, query["ExpressionAttributeValues"][":prefix"])
+        self.assertTrue(query["ConsistentRead"])
         requests = client.batch_write_item.call_args.kwargs["RequestItems"]
         self.assertEqual(2, len(next(iter(requests.values()))))
         client.delete_item.assert_called_once()
+
+    @patch("app.database.repository.time.sleep")
+    def test_delete_retries_unprocessed_chunks_before_removing_status(self, sleep):
+        client = Mock()
+        client.query.return_value = {"Items": [
+            {"corpus_id": {"S": "c"}, "chunk_id": {"S": "chunk"}}
+        ]}
+        pending = {"chunks": [{"DeleteRequest": {"Key": {"chunk_id": {"S": "chunk"}}}}]}
+        client.batch_write_item.side_effect = [{"UnprocessedItems": pending}, {}]
+        DynamoRepository(client).delete_document(corpus_id="c", document_id="upload")
+        self.assertEqual(pending, client.batch_write_item.call_args.kwargs["RequestItems"])
+        client.delete_item.assert_called_once()
+
+    @patch("app.database.repository.time.sleep")
+    def test_failed_chunk_deletion_preserves_status_for_retry(self, sleep):
+        client = Mock()
+        client.query.return_value = {"Items": [
+            {"corpus_id": {"S": "c"}, "chunk_id": {"S": "chunk"}}
+        ]}
+        client.batch_write_item.return_value = {"UnprocessedItems": {"chunks": [{}]}}
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            DynamoRepository(client).delete_document(corpus_id="c", document_id="upload")
+        client.delete_item.assert_not_called()
+
+    def test_search_excludes_deleted_and_unfinished_uploads(self):
+        from types import SimpleNamespace
+        repository = DynamoRepository(Mock())
+        repository.get_document_status = Mock(side_effect=[None, {"status": "processing"}, {"status": "ready"}])
+        records = [SimpleNamespace(source="upload", external_id=value) for value in
+                   ("deleted", "deleted", "pending", "ready")]
+        arxiv = SimpleNamespace(source="arxiv")
+        visible = repository._searchable_documents(records + [arxiv], "corpus")
+        self.assertEqual([records[-1], arxiv], visible)
+        self.assertEqual(3, repository.get_document_status.call_count)
+
+    def test_orphan_chunk_returned_by_vector_index_is_not_returned_to_rag(self):
+        client = FakeDynamoClient()
+        repository = DynamoRepository(client)
+        repository.put_document(
+            corpus_id="c", source="upload", external_id="original-upload-id",
+            title="Deleted file", abstract=None, authors=[], publication_date=None,
+            source_url=None, license_url=None, content="Old searchable text",
+            embedding=[0.1, 0.2], embedding_model="test-model",
+        )
+        client.get_item = Mock(return_value={})
+        results = repository.search_documents(
+            corpus_id="c", embedding=[0.1, 0.2], embedding_model="test-model", limit=5,
+        )
+        self.assertEqual([], results)
+        self.assertEqual({"S": "original-upload-id"},
+                         client.get_item.call_args.kwargs["Key"]["document_id"])
+        self.assertTrue(client.get_item.call_args.kwargs["ConsistentRead"])
 
 if __name__ == "__main__":
     unittest.main()

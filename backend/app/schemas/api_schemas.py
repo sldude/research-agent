@@ -51,7 +51,7 @@ class RetrievedChunk(BaseModel):
     title: str
     content: str
     source_url: str | None
-    distance: float
+    distance: float | None
 
 class RagSource(BaseModel):
     """One database-backed source supplied to the generation model to answer post similarity retrieval."""
@@ -61,7 +61,7 @@ class RagSource(BaseModel):
     external_id: str | None
     title: str
     source_url: str | None
-    distance: float
+    distance: float | None
 
 class RagAnswer(BaseModel):
     """A generated answer with the sources supplied to the model."""
