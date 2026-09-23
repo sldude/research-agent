@@ -177,6 +177,7 @@ class ApiTests(unittest.TestCase):
 
     @patch("app.main.DynamoRepository")
     def test_list_corpora(self, repository_class: Mock) -> None:
+        repository_class.return_value.count_documents.side_effect = [1234, 0]
         repository_class.return_value.list_corpora.return_value = [
             CorpusRecord(
                 id="corpus-1",
@@ -203,6 +204,23 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/api/corpora")
         self.assertEqual(200, response.status_code)
         self.assertEqual(["corpus-1", "corpus-2"], [row["id"] for row in response.json()])
+        self.assertEqual([1234, 0], [row["document_count"] for row in response.json()])
+        self.assertEqual(["corpus-1", "corpus-2"], [
+            call.args[0] for call in repository_class.return_value.count_documents.call_args_list
+        ])
+
+    @patch("app.main.DynamoRepository")
+    def test_create_existing_corpus_returns_current_count(self, repository_class: Mock) -> None:
+        repository = repository_class.return_value
+        repository.get_or_create_corpus.return_value = CorpusRecord(
+            id="corpus-1", name="Existing", corpus_type="user_upload",
+            owner_id="test-user", created_at=datetime.now(timezone.utc),
+        )
+        repository.count_documents.return_value = 3
+        response = self.client.post("/api/corpora", json={"name": "Existing"})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(3, response.json()["document_count"])
+        repository.count_documents.assert_called_once_with("corpus-1", "user_upload")
 
     @patch("app.main.answer_question")
     @patch("app.main.DynamoRepository")

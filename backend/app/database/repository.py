@@ -129,6 +129,32 @@ class DynamoRepository:
             key=lambda corpus: corpus.created_at,
         )
 
+    def count_documents(self, corpus_id: str, corpus_type: str) -> int:
+        """Count upload records or distinct indexed papers across every page."""
+        uploads = corpus_type == "user_upload"
+        request = {
+            "TableName": DYNAMODB_DOCUMENT_STATUS_TABLE if uploads else DYNAMODB_CHUNKS_TABLE,
+            "KeyConditionExpression": "corpus_id = :corpus_id",
+            "ExpressionAttributeValues": {":corpus_id": _string(corpus_id)},
+            "ConsistentRead": True,
+        }
+        if uploads:
+            request["Select"] = "COUNT"
+        else:
+            request["ProjectionExpression"] = "document_id"
+        count = 0
+        documents = set()
+        while True:
+            response = self.client.query(**request)
+            if uploads:
+                count += response.get("Count", 0)
+            else:
+                documents.update(item["document_id"]["S"] for item in response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                return count if uploads else len(documents)
+            request["ExclusiveStartKey"] = last_key
+
     def get_corpus(self, corpus_id: str) -> CorpusRecord | None:
         response = self.client.get_item(
             TableName=DYNAMODB_CORPORA_TABLE,

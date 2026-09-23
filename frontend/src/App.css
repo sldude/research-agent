@@ -72,6 +72,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .corpus-list-panel li { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: start; gap: 6px; padding: 4px; border: 1px solid transparent; border-radius: 10px; }
 .corpus-list-panel li.active { border-color: #c9d7f1; background: var(--accent-bg); }
 .corpus-list-panel .select-corpus { min-width: 0; padding: 8px; border: 0; background: transparent; color: var(--text-h); line-height: 1.35; overflow-wrap: anywhere; text-align: left; white-space: normal; }
+.corpus-document-count { display: block; margin-top: 3px; font-size: .85rem; color: var(--text); }
 .corpus-list-panel .delete-corpus { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid #f3b9bf; border-radius: 7px; background: #feecee; color: #bd2c3b; }
 .corpus-list-panel .delete-corpus:hover { background: #f8cdd2; }
 .corpus-list-panel .delete-corpus svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }

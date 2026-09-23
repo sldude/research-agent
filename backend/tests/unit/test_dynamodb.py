@@ -41,6 +41,38 @@ class FakeDynamoClient:
 
 
 class DynamoRepositoryTests(unittest.TestCase):
+    def test_count_uploaded_documents_paginates_status_records(self):
+        client = Mock()
+        last_key = {"corpus_id": {"S": "c"}, "document_id": {"S": "a"}}
+        client.query.side_effect = [
+            {"Count": 2, "LastEvaluatedKey": last_key}, {"Count": 1},
+        ]
+        self.assertEqual(3, DynamoRepository(client).count_documents("c", "user_upload"))
+        first, second = client.query.call_args_list
+        self.assertEqual("COUNT", first.kwargs["Select"])
+        self.assertNotIn("FilterExpression", first.kwargs)
+        self.assertEqual(last_key, second.kwargs["ExclusiveStartKey"])
+
+    def test_count_papers_deduplicates_chunks_across_pages(self):
+        client = Mock()
+        last_key = {"corpus_id": {"S": "c"}, "chunk_id": {"S": "a#chunk:1"}}
+        client.query.side_effect = [
+            {"Items": [{"document_id": {"S": "a"}}, {"document_id": {"S": "a"}}],
+             "LastEvaluatedKey": last_key},
+            {"Items": [{"document_id": {"S": "a"}}, {"document_id": {"S": "b"}}]},
+        ]
+        self.assertEqual(2, DynamoRepository(client).count_documents("c", "research_abstract"))
+        first, second = client.query.call_args_list
+        self.assertEqual("document_id", first.kwargs["ProjectionExpression"])
+        self.assertEqual({":corpus_id": {"S": "c"}}, first.kwargs["ExpressionAttributeValues"])
+        self.assertEqual(last_key, second.kwargs["ExclusiveStartKey"])
+
+    def test_empty_corpus_count(self):
+        for corpus_type in ("user_upload", "research_abstract"):
+            client = Mock()
+            client.query.return_value = {"Items": [], "Count": 0}
+            self.assertEqual(0, DynamoRepository(client).count_documents("c", corpus_type))
+
     def test_document_round_trip_and_rank(self) -> None:
         client = FakeDynamoClient()
         repository = DynamoRepository(client=client)

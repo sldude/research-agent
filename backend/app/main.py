@@ -66,14 +66,16 @@ def cors_preflight(path: str) -> Response:
 def list_corpora(user_id: str = Depends(get_current_user_id)) -> list[CorpusResponse]:
     """Return shared corpora and private corpora owned by the current user."""
 
+    repository = DynamoRepository()
     return [
         CorpusResponse(
             id=corpus.id,
             name=corpus.name,
             corpus_type=corpus.corpus_type,
             owner_id=corpus.owner_id,
+            document_count=repository.count_documents(corpus.id, corpus.corpus_type),
         )
-        for corpus in DynamoRepository().list_corpora()
+        for corpus in repository.list_corpora()
         if corpus.owner_id is None or corpus.owner_id == user_id
     ]
 
@@ -362,7 +364,8 @@ def create_corpus(
     if not name:
         raise HTTPException(status_code=400, detail="Enter a corpus name.")
 
-    corpus = DynamoRepository().get_or_create_corpus(
+    repository = DynamoRepository()
+    corpus = repository.get_or_create_corpus(
         name=name,
         corpus_type="user_upload",
         owner_id=user_id,
@@ -373,6 +376,7 @@ def create_corpus(
         name=corpus.name,
         corpus_type=corpus.corpus_type,
         owner_id=corpus.owner_id,
+        document_count=repository.count_documents(corpus.id, corpus.corpus_type),
     )
 
 # get listed documents within corpus belonging to user

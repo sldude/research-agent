@@ -18,6 +18,12 @@ type Corpus = {
   name: string
   corpus_type: string
   owner_id: string | null
+  document_count?: number
+}
+
+function corpusDocumentCount(corpus: Corpus) {
+  if (corpus.document_count === undefined) return 'Document count unavailable'
+  return `${corpus.document_count.toLocaleString()} document${corpus.document_count === 1 ? '' : 's'}`
 }
 
 type UploadedDocument = {
@@ -271,6 +277,9 @@ function App() {
         if (controller.signal.aborted) return
 
         setDocuments(result)
+        setCorpora((current) => current.map((corpus) =>
+          corpus.id === documentCorpusId ? { ...corpus, document_count: result.length } : corpus,
+        ))
         setDocumentsMessage(
           result.length === 0 ? 'No documents in this corpus yet.' : '',
         )
@@ -1044,7 +1053,7 @@ function App() {
                     setRagMessage('')
                   }}>
                     <strong>{corpusDisplayName(corpus)}</strong>
-                    <span>{corpusTypeLabel(corpus.corpus_type)}</span>
+                    <span>{corpusTypeLabel(corpus.corpus_type)} · {corpusDocumentCount(corpus)}</span>
                   </button>
                 </li>
               ))}
@@ -1122,7 +1131,10 @@ function App() {
             <h3>Your Corpora</h3>
             <ul>
               {userCorpora.map((corpus) => <li className={documentCorpusId === corpus.id ? 'active' : ''} key={corpus.id}>
-                <button type="button" className="select-corpus" onClick={() => handleDocumentCorpusChange(corpus.id)}>{corpus.name}</button>
+                <button type="button" className="select-corpus" onClick={() => handleDocumentCorpusChange(corpus.id)}>
+                  {corpus.name}
+                  <span className="corpus-document-count">{corpusDocumentCount(corpus)}</span>
+                </button>
                 <button type="button" className="delete-corpus" aria-label={`Delete ${corpus.name}`} disabled={deletingCorpusId === corpus.id} onClick={() => void handleDeleteCorpus(corpus)}><DeleteIcon /></button>
               </li>)}
             </ul>
