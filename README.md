@@ -32,17 +32,30 @@ Under the hood, it uses retrieval-augmented generation (RAG): it finds relevant 
 | Infrastructure | AWS SAM | Defines the API, functions, authentication, and AWS permissions |
 
 ```mermaid
+%%{init: {"flowchart": {"useMaxWidth": true, "nodeSpacing": 45, "rankSpacing": 65}, "themeVariables": {"fontSize": "16px"}}}%%
 flowchart LR
-    UI[React app on Vercel] --> Auth[Amazon Cognito]
-    UI -->|Access token and question| API[API Gateway and FastAPI on Lambda]
-    API -->|Read metadata and search vectors| DB[(DynamoDB)]
-    API -->|Embed question and generate answer| AI["Amazon Bedrock<br/>Titan Text Embeddings V2: embeddings<br/>Nova 2 Lite: answers"]
-    API -->|Authorize direct upload| UI
-    UI -->|Presigned upload| S3[(Private S3 storage)]
-    S3 -->|Object created| Worker[Document ingestion Lambda]
-    Worker -->|Embed text chunks| AI
-    Worker -->|Save chunks and status| DB
+    UI["React app<br/>Vercel"] -->|Sign in| Auth[Amazon Cognito]
+    UI -->|Question and access token| API["FastAPI on Lambda<br/>API Gateway"]
+    API -->|Question text| Titan["Amazon Bedrock<br/>Titan Text Embeddings V2"]
+    Titan -->|Question vector for semantic search| DB[("DynamoDB<br/>Stored text and vectors<br/>Cosine similarity search")]
+    DB -->|Relevant text excerpts| Nova["Amazon Bedrock<br/>Nova 2 Lite"]
+    API -->|Question and instructions| Nova
+    Nova -->|Generated answer| API
+    API -->|Validated answer and citations| UI
+
+    API -->|Authorize upload| UI
+    UI -->|Direct file upload| S3[(Private S3 storage)]
+    S3 -->|New file| Worker["Ingestion worker<br/>Extract and chunk text"]
+    Worker -->|Document chunks| Titan
+    Arxiv["arXiv ingestion<br/>Title and abstract"] -->|Paper text| Titan
+    Titan -->|Document vectors stored during ingestion| DB
+    Worker -->|Original chunk text| DB
+    Arxiv -->|Paper text and metadata| DB
 ```
+
+The arrows show data flow: the backend coordinates the Bedrock calls and DynamoDB operations. Ingestion stores document text alongside Titan embeddings. At question time, a new question embedding finds similar stored vectors in the selected corpus. **Nova receives the matching text excerpts, not the vectors**, and the backend validates its citations before returning the answer to React.
+
+The diagram uses a horizontal layout with extra spacing. GitHub limits the width of the README content column; for a wider view, paste the Mermaid block into the [Mermaid Live Editor](https://mermaid.live/) and expand its preview.
 
 ### Why this structure
 
