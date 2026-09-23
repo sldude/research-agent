@@ -33,37 +33,15 @@ Under the hood, it uses retrieval-augmented generation (RAG): it finds relevant 
 
 ```mermaid
 flowchart LR
-    UI[React app on Vercel] --> Auth[Amazon Cognito]
-    UI -->|Access token and question| API[API Gateway and FastAPI on Lambda]
-
-    subgraph Bedrock[Amazon Bedrock]
-        Titan["Amazon Titan Text Embeddings V2<br/>amazon.titan-embed-text-v2:0"]
-        Nova["Amazon Nova 2 Lite<br/>us.amazon.nova-2-lite-v1:0"]
-    end
-
-    subgraph DynamoDB[Amazon DynamoDB]
-        DB[(Document chunks, vectors and metadata)]
-        Search["Semantic search<br/>Cosine similarity<br/>Filtered by corpus and embedding model"]
-        DB -->|Stored vectors| Search
-    end
-
-    API -->|1. Embed question| Titan
-    Titan -->|Question vector returned to API| API
-    API -->|2. Search with question vector| Search
-    Search -->|3. Retrieve matching excerpts| Context["Backend builds evidence context<br/>Group excerpts by document"]
-    Context -->|4. Question and evidence| Nova
-    Nova -->|5. Generated answer and source IDs| Validate[Backend validates citations]
-    Validate -->|6. Answer and original source metadata| UI
-
-    API -->|Authorize direct upload| UI
-    UI -->|Presigned upload| S3[(Private S3 storage)]
-    S3 -->|Object created| Worker[Document ingestion Lambda]
-    Worker -->|Embed extracted text chunks| Titan
-    Titan -->|Chunk vectors| Worker
-    Worker -->|Save chunks, vectors and status| DB
+    UI[React app on Vercel] -->|Question| API[FastAPI on AWS Lambda]
+    API --> Titan["Amazon Titan Text Embeddings V2<br/>Embed question"]
+    Titan -->|Question vector| Search["DynamoDB semantic search<br/>Find relevant document excerpts"]
+    Search -->|Evidence and question| Nova["Amazon Nova 2 Lite<br/>Generate answer"]
+    Nova --> Answer[Answer with validated citations]
+    Docs[arXiv abstracts and uploaded documents] -->|Ingest and embed with Titan| Search
 ```
 
-The numbered steps show the standard question-answering path, coordinated by the backend. Semantic search runs in DynamoDB; Titan creates embeddings and Nova writes the answer. Model names above are the configured defaults, with Nova invoked through its US inference profile.
+The backend coordinates this flow and returns the answer to the app. Both models run through Amazon Bedrock; DynamoDB searches the selected corpus using cosine similarity. Authentication and upload processing are described below.
 
 ### Why this structure
 
