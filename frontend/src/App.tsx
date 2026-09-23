@@ -955,9 +955,19 @@ function App() {
         <nav className="workspace-tabs" aria-label="Workspace pages" inert={isDeletingAccount}>
           <button type="button" className={activeTab === 'ask' ? 'active' : ''} aria-current={activeTab === 'ask' ? 'page' : undefined} onClick={() => setActiveTab('ask')}>Ask</button>
           <button type="button" className={activeTab === 'manage' ? 'active' : ''} aria-current={activeTab === 'manage' ? 'page' : undefined} onClick={() => setActiveTab('manage')}>My Corpora</button>
-          <button type="button" className={activeTab === 'settings' ? 'active' : ''} aria-current={activeTab === 'settings' ? 'page' : undefined} onClick={() => setActiveTab('settings')}>Settings</button>
         </nav>
-        <div className="sidebar-account"><span title={signedInUser}>{signedInUser}</span><button type="button" disabled={isDeletingAccount} onClick={handleSignOut}>Sign out</button></div>
+        <div className="sidebar-account">
+          <div className="sidebar-account-details">
+            <span title={signedInUser}>{signedInUser}</span>
+            <button type="button" className={`account-settings-toggle${activeTab === 'settings' ? ' active' : ''}`} aria-label="Account settings" title="Account settings" aria-current={activeTab === 'settings' ? 'page' : undefined} disabled={isDeletingAccount} onClick={() => setActiveTab('settings')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m9.5 3-.5 2a8 8 0 0 0-1.5.9l-2-.6L3 9.7l1.5 1.4a8 8 0 0 0 0 1.8L3 14.3l2.5 4.4 2-.6a8 8 0 0 0 1.5.9l.5 2h5l.5-2a8 8 0 0 0 1.5-.9l2 .6 2.5-4.4-1.5-1.4a8 8 0 0 0 0-1.8L21 9.7l-2.5-4.4-2 .6A8 8 0 0 0 15 5l-.5-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+          <button type="button" disabled={isDeletingAccount} onClick={handleSignOut}>Sign out</button>
+        </div>
       </aside>}
 
       <div className={signedInUser ? 'workspace-content' : 'login-content'}>

@@ -38,6 +38,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .sidebar-account { display: grid; gap: 8px; margin-top: auto; padding: 16px 10px 0; border-top: 1px solid var(--border); font-size: .8rem; }
 .sidebar-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-account button { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); font-weight: 650; }
+.sidebar-account-details { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sidebar-account-details span { flex: 1; min-width: 0; }
+.sidebar-account .account-settings-toggle { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; color: var(--text); }
+.account-settings-toggle svg { width: 20px; height: 20px; }
+.sidebar-account .account-settings-toggle:hover, .sidebar-account .account-settings-toggle.active { background: #e9efff; color: var(--accent); }
+.sidebar-account .account-settings-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .github-link { align-self: flex-start; font-size: .75rem; font-weight: 400; text-decoration: none; }
 .github-link:hover { text-decoration: underline; }
 .github-link:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; border-radius: 3px; }
