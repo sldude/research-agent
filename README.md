@@ -33,15 +33,16 @@ Under the hood, it uses retrieval-augmented generation (RAG): it finds relevant 
 
 ```mermaid
 flowchart LR
-    UI[React app on Vercel] -->|Question| API[FastAPI on AWS Lambda]
-    API --> Titan["Amazon Titan Text Embeddings V2<br/>Embed question"]
-    Titan -->|Question vector| Search["DynamoDB semantic search<br/>Find relevant document excerpts"]
-    Search -->|Evidence and question| Nova["Amazon Nova 2 Lite<br/>Generate answer"]
-    Nova --> Answer[Answer with validated citations]
-    Docs[arXiv abstracts and uploaded documents] -->|Ingest and embed with Titan| Search
+    UI[React app on Vercel] --> Auth[Amazon Cognito]
+    UI -->|Access token and question| API[API Gateway and FastAPI on Lambda]
+    API -->|Read metadata and search vectors| DB[(DynamoDB)]
+    API -->|Embed question and generate answer| AI["Amazon Bedrock<br/>Titan Text Embeddings V2: embeddings<br/>Nova 2 Lite: answers"]
+    API -->|Authorize direct upload| UI
+    UI -->|Presigned upload| S3[(Private S3 storage)]
+    S3 -->|Object created| Worker[Document ingestion Lambda]
+    Worker -->|Embed text chunks| AI
+    Worker -->|Save chunks and status| DB
 ```
-
-The backend coordinates this flow and returns the answer to the app. Both models run through Amazon Bedrock; DynamoDB searches the selected corpus using cosine similarity. Authentication and upload processing are described below.
 
 ### Why this structure
 
