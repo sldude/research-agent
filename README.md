@@ -1,172 +1,147 @@
-# research-agent
+﻿# Research Agent
+
+Research Agent helps users understand a collection of research without having to locate every relevant passage manually. Users can ask about a topic, compare approaches, or explore connections across papers and documents, then follow the citations back to the evidence behind an answer.
+
+The app supports two starting points: a shared collection of arXiv research abstracts and private collections of documents uploaded by the user. Its purpose is to support discovery and reading by making those collections easier to question and explore. The original sources remain available for checking claims and investigating details.
+
+Under the hood, it uses retrieval-augmented generation (RAG): it finds relevant text in the selected collection and supplies that evidence to a language model to compose an answer. The sections below explain the user experience, system architecture, ingestion and retrieval flows, APIs, and codebase.
+
+**[Try the app on Vercel](https://research-agent-iota.vercel.app/)** — create an account or sign in to get started.
+
+## What you can do
+
+- Ask about findings, methods, and connections within a selected corpus.
+- Explore the subjects covered by a corpus through overview questions.
+- Create private corpora and upload PDF, TXT, or Markdown files.
+- Preview uploaded documents, track processing, and delete documents or corpora.
+- Review citations, source links, and retrieval distances alongside an answer.
+
+## Stack and architecture
+
+| Layer | Technology | Role |
+| --- | --- | --- |
+| Web application | React, TypeScript, Vite | Corpus management, uploads, questions, and source display |
+| Frontend hosting | Vercel | Builds and serves the web application |
+| Authentication | Amazon Cognito, AWS Amplify | Sign-up, sign-in, and browser access tokens |
+| HTTP API | FastAPI, Pydantic, API Gateway | Validated requests, authentication, and corpus access checks |
+| Compute | AWS Lambda, Mangum | Runs FastAPI and a separate document ingestion worker |
+| Database | Amazon DynamoDB with native vector search | Corpus metadata, document chunks, embeddings, and ingestion status |
+| File storage | Amazon S3 | Private original uploads and direct browser uploads |
+| Embeddings | Amazon Titan Text Embeddings V2 via Bedrock | Converts text into normalized vectors; 1,024 dimensions by default |
+| Answer generation | Amazon Nova 2 Lite via Bedrock | Synthesizes answers from retrieved evidence |
+| Infrastructure | AWS SAM | Defines the API, functions, authentication, and AWS permissions |
+
+```mermaid
+flowchart LR
+    UI[React app on Vercel] --> Auth[Amazon Cognito]
+    UI -->|Access token and question| API[API Gateway and FastAPI on Lambda]
+    API -->|Read metadata and search vectors| DB[(DynamoDB)]
+    API -->|Embed question and generate answer| AI[Amazon Bedrock]
+    API -->|Authorize direct upload| UI
+    UI -->|Presigned upload| S3[(Private S3 storage)]
+    S3 -->|Object created| Worker[Document ingestion Lambda]
+    Worker -->|Embed text chunks| AI
+    Worker -->|Save chunks and status| DB
+```
+
+### Why this structure
+
+The frontend handles interaction while the backend owns access checks, retrieval, and model calls. API Gateway validates Cognito tokens, and the API checks corpus ownership before accessing private data. AWS service credentials remain on the backend.
+
+DynamoDB holds both document records and their searchable vectors, avoiding a separate vector database and a second copy of source metadata. Three tables separate corpus definitions, embedded chunks, and upload status. A document can have many chunks, but citations and document counts refer to distinct documents.
+
+Original files live in S3. A short-lived upload authorization lets the browser send file bytes directly to S3, keeping file transfer out of the API request. A separate Lambda performs extraction and embedding asynchronously, so uploading a file does not require waiting for all its text to be processed. Status records let the frontend show progress; failed worker invocations have retries and an SQS failure destination.
+
+Embedding and generation are separate operations. Titan provides a common vector representation for stored text and questions; Nova receives the selected text as evidence when composing an answer. This lets the app retrieve from a specific corpus without putting the entire collection into the model prompt.
+
+Document counts load separately from the corpus list so expensive counting does not block corpus selection or questions.
+
+## How documents become searchable
+
+### arXiv papers
+
+The [arXiv client](backend/app/clients/arxiv_api_client.py) queries the Atom API and normalizes paper metadata into validated records: title, abstract, authors, identifiers, dates, categories, license, and source URL. Requests are paced within the client process.
+
+The [ingestion service](backend/app/services/arxiv_ingestion.py) combines each paper's **title and abstract**, generates a Titan embedding, and stores the text, vector, and metadata in DynamoDB. Existing embeddings are reused when the text and embedding configuration have not changed. The interactive entry point is [arxiv_import_metadata.py](backend/app/scripts/arxiv_import_metadata.py).
+
+This path indexes abstracts rather than full paper PDFs. Questions in the web app search the stored corpus; they do not run a live arXiv search on every request.
+
+### Uploaded documents
+
+1. The browser requests upload authorization with a filename and file size. The API checks ownership and file constraints, creates a status record, and returns a presigned S3 POST.
+2. The browser uploads the file directly to S3. Supported files are PDF, TXT, and Markdown, up to 5,000,000 bytes each.
+3. An S3 object-created event invokes the ingestion worker. It checks the upload record and reads the file.
+4. The ingestion service extracts text and splits it into chunks of **2,000 characters with 200 characters of overlap**. The overlap preserves some context across chunk boundaries.
+5. Titan embeds each chunk. The worker stores the chunks and their document identity in DynamoDB, then marks the upload ready. The frontend polls for status.
+
+PDF extraction uses `pypdf`; scanned PDFs need OCR before upload. TXT and Markdown files must contain UTF-8 text. Retrieval excludes uploaded chunks whose upload record is missing or not ready.
+
+## How an answer is produced
+
+1. **Check access.** The API verifies that the selected corpus is shared or belongs to the signed-in user.
+2. **Embed the question.** Titan converts the question into a vector using the same configured embedding model as the stored text.
+3. **Retrieve evidence.** DynamoDB performs cosine vector search filtered by corpus and embedding model. The UI currently requests five candidate chunks. Multiple chunks may come from the same document, so five chunks do not necessarily mean five papers.
+4. **Assemble context.** Retrieved excerpts are grouped by document, giving each document one citation number while retaining its matching excerpts.
+5. **Generate an answer.** Nova receives the question, evidence, and grounding instructions. It is instructed to avoid unsupported claims and recommend relevant material when evidence is insufficient. Brief, explicitly identified general background is permitted for introductory explanations.
+6. **Validate references.** The backend checks source IDs, duplicates, citation-list consistency, and requested source counts. Titles and URLs come from stored records. Invalid or incomplete model output gets one retry before a handled error is returned.
+
+By default, the source list contains only cited documents. If a question requests a number of sources, the model can select up to that many relevant distinct documents, with uncited selections labeled **Additional relevant sources**. It is instructed not to pad the list with unrelated material. Relevance and factual support remain model judgments; reference validation checks structure and provenance.
+
+The displayed distance comes from retrieval, not the language model; lower cosine distance indicates a closer match. Broad corpus-overview questions take a separate path: an inventory of up to 100 documents supplies abstracts or opening excerpts instead of the usual nearest-neighbor search. Those sources display **Overview** rather than a distance.
+
+## API overview
+
+Application endpoints require a Cognito access token in `Authorization: Bearer <token>`. The health endpoint is public. Private corpus and document operations check ownership.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Service health check |
+| GET | `/api/corpora` | List shared and user-owned corpora |
+| POST | `/api/corpora` | Create or reuse a named private corpus |
+| GET | `/api/corpora/{corpus_id}/document-count` | Load a corpus's document count independently |
+| DELETE | `/api/corpora/{corpus_id}` | Delete an owned corpus and its documents |
+| GET | `/api/corpora/{corpus_id}/documents` | List uploaded documents and processing statuses |
+| POST | `/api/corpora/{corpus_id}/documents` | Authorize a direct S3 upload using filename and size |
+| GET | `/api/corpora/{corpus_id}/documents/{document_id}/status` | Check ingestion progress |
+| GET | `/api/corpora/{corpus_id}/documents/{document_id}/content` | Retrieve an uploaded file for preview |
+| DELETE | `/api/corpora/{corpus_id}/documents/{document_id}` | Delete an uploaded file and its indexed chunks |
+| POST | `/api/rag/answer` | Retrieve evidence and return an answer with source records |
+
+An answer request has this shape:
+
+```json
+{
+  "corpus_id": "selected-corpus-id",
+  "question": "What approaches to retrieval are discussed?",
+  "limit": 5,
+  "max_tokens": 600
+}
+```
+
+The response contains `question`, `answer`, and `sources`. Each source includes its citation number, document ID, title, URL when available, retrieval distance, and whether it is cited or additional. See [api_schemas.py](backend/app/schemas/api_schemas.py) for the request and response models and [main.py](backend/app/main.py) for route behavior.
+
+## Codebase guide
+
+| Location | Responsibility |
+| --- | --- |
+| [frontend/src/App.tsx](frontend/src/App.tsx) | Authentication screens, Ask and My Corpora views, API requests, and UI state |
+| [frontend/src/main.tsx](frontend/src/main.tsx) | React entry point and Cognito configuration through Amplify |
+| [frontend/src/uploadDocument.ts](frontend/src/uploadDocument.ts) | Upload authorization and direct transfer to S3 |
+| [frontend/src/App.css](frontend/src/App.css) | Application layout and styling |
+| [backend/app/main.py](backend/app/main.py) | FastAPI routes, ownership checks, previews, and deletion |
+| [backend/app/schemas/](backend/app/schemas/) | Pydantic validation at API and model-output boundaries |
+| [backend/app/clients/](backend/app/clients/) | arXiv HTTP client and Bedrock embedding/generation clients |
+| [backend/app/services/](backend/app/services/) | Ingestion, text splitting, vector retrieval, prompts, and citation resolution |
+| [backend/app/database/](backend/app/database/) | Typed stored records, DynamoDB connections, and repository operations |
+| [backend/app/workers/document_ingestion_worker.py](backend/app/workers/document_ingestion_worker.py) | S3 event processing and upload lifecycle management |
+| [backend/template.yaml](backend/template.yaml) | SAM infrastructure and service permissions |
+| [backend/tests/](backend/tests/) | Offline unit tests and opt-in AWS integration checks |
+| [frontend/tests/](frontend/tests/) | Upload-flow tests |
+
+The backend follows a route → service → client/repository structure: routes deal with HTTP and access, services coordinate application behavior, and clients and the repository isolate external calls. This separation makes retrieval, ingestion, and error handling testable without live AWS requests.
+
+## Acknowledgements
 
 Thank you to arXiv for use of its open access interoperability.
 
-The backend uses Amazon DynamoDB with native vector search for corpus metadata,
-document chunks, and Titan embeddings. Amazon Bedrock generates embeddings and
-grounded answers.
-
-From `backend`, install dependencies and provision the on-demand tables:
-
-```bash
-pip install -r requirements.txt
-python -m app.scripts.create_dynamodb_tables
-```
-
-Provisioning creates `research-agent-corpora`, `research-agent-chunks`,
-`research-agent-document-status`, and a cosine vector index named
-`embedding-index` on the chunks table. Table deletion protection is enabled.
-Existing tables are reused. Configure alternate names in `backend/.env` if needed.
-
-The API template references these tables; the Python provisioning script creates
-them. Keep `DYNAMODB_DOCUMENT_STATUS_TABLE` in the local environment and the SAM
-`DocumentStatusTableName` parameter set to the same name. Provision tables before
-deploying the API.
-
-If you already deployed the earlier template that created `DocumentStatusTable`,
-reuse its physical table name in both settings. That earlier resource has
-`DeletionPolicy: Retain`, so removing it from the stack retains the table and its
-data. The provisioning script will skip creating it when configured with that name.
-
-## Uploaded document ingestion
-
-Upload migration, step 1: `POST /api/corpora/{corpus_id}/documents` now accepts
-authenticated JSON metadata, for example
-`{"filename": "paper.pdf", "size_bytes": 5000000}`, instead of multipart file data.
-It checks corpus ownership and the PDF/TXT/Markdown extension, signs an S3 POST
-for one generated object key, and saves an `uploading` record before responding.
-The response includes `document_id`, `corpus_id`, `filename`, `status`,
-`upload_url`, `fields`, and `expires_in` (300 seconds). The signed policy enforces
-1 through 5,000,000 bytes. The browser must POST all returned fields followed by
-the file to `upload_url`, then poll the existing status endpoint. Authorization
-does not mean the file has been uploaded; the S3 worker advances its status.
-
-Both frontend forms now send files directly to S3 and the API and worker share
-`backend/app/upload_limits.py` (5 MB). Existing status polling continues after
-S3 accepts a file. Failed or abandoned uploads remain visible and can be removed
-through My Corpora after the backend's ten-minute grace period. Cleanup is manual;
-there is no automatic expiration or per-user quota yet.
-
-Before deploying, configure CORS on the existing bucket. From `backend`, preview
-this merge of a POST rule with the existing rules (use your configured AWS profile):
-
-```powershell
-.\backend_venv\Scripts\python.exe -m app.scripts.configure_upload_cors --bucket aws-sam-cli-managed-default-samclisourcebucket-zkwprzmdq7df --origin https://research-agent-iota.vercel.app --origin http://localhost:5173 --profile research-agent
-```
-
-Add `--apply` to save it. This preserves other CORS rules and does not change the
-bucket's public access settings. If your deployment uses a different bucket or
-frontend origin, pass those values instead. The existing S3 event notification
-must include `ObjectCreated:Post` (an all-object-created notification already does).
-
-Deploy the API and worker together with SAM, then deploy the frontend through
-Vercel. The new JSON authorization API is incompatible with the previous frontend,
-so coordinate those releases. Verify a 5,000,000-byte TXT file reaches `ready`,
-a 5,000,001-byte file is rejected, and another user's corpus cannot be uploaded to.
-
-Document uploads use the separate `research-agent-document-ingestion` Lambda
-defined in `backend/template.yaml`. Before enabling its S3 notification, run
-the offline worker tests from `backend`:
-
-```bash
-python -m unittest tests.unit.test_document_worker tests.unit.test_api tests.unit.test_dynamodb
-```
-
-Provision the tables, then run `sam build --use-container` and `sam deploy --guided`.
-Keep the existing upload bucket and table parameters. In the existing upload
-bucket's S3 Properties page, create an event notification for all object-created
-events, prefix `uploads/`, no suffix, targeting `research-agent-document-ingestion`.
-The bucket and worker must be in the same region. The template grants invocation
-permission but does not configure this existing bucket's notification.
-
-Test with a new small TXT upload through the application (not directly through
-S3, because the API creates the required status record). Inspect the
-document-status table for `ready` and `chunks_saved`. The frontend checks the
-document status after upload and reports when ingestion is ready. Failed processing is
-logged under `/aws/lambda/research-agent-document-ingestion`; exhausted retries
-go to the SQS queue exposed by `DocumentIngestionFailureQueueUrl`. That queue is
-for inspection and manual replay; it does not automatically restart jobs. An
-expired processing lease likewise requires another invocation to resume.
-
-Current limitations: retries can re-embed previously written chunks, and RAG
-retrieval does not yet exclude partially ingested documents. Validate this flow
-with a test corpus before broader use. Enabling notifications does not process
-objects uploaded earlier.
-
-## Bulk arXiv abstract ingestion
-
-For asynchronous Titan V2 embedding jobs through S3 and Bedrock, see
-[the batch ingestion walkthrough](backend/BATCH_INGESTION.md). It includes local
-preparation, console setup in Virginia, and result import into the Ohio tables.
-
-Download the metadata snapshot from https://www.kaggle.com/datasets/Cornell-University/arxiv
-and unpack `arxiv-metadata-oai-snapshot.json` into `data/` at the project root.
-This is newline-delimited JSON despite its `.json` extension. PDFs are not needed.
-Keep snapshots outside `backend/` so they are not bundled into Lambda deployments.
-The root `data/` folder is ignored by Git.
-
-From `backend`, using the Python environment with the backend dependencies installed:
-
-```powershell
-# Validate the first 10,000 records locally. No AWS calls or writes.
-python -m app.scripts.arxiv_bulk_import ../data/arxiv-metadata-oai-snapshot.json --limit 10000
-
-# Embed and save the first 10,000 records to the existing main corpus.
-python -m app.scripts.arxiv_bulk_import ../data/arxiv-metadata-oai-snapshot.json --limit 10000 --execute
-
-# Resume from the checkpoint and import every remaining record.
-python -m app.scripts.arxiv_bulk_import ../data/arxiv-metadata-oai-snapshot.json --all --execute
-```
-
-Execution uses the AWS profile and region in `backend/.env` and incurs Bedrock
-and DynamoDB charges. Tables must already exist. The importing identity needs
-`DescribeTable`, `Scan`, `GetItem`, and `PutItem` on the configured tables plus
-permission to invoke the embedding model. The API Lambda role is read-only and
-is not used for this job. No API deployment is required to run the importer.
-
-The default corpus is `My arXiv research corpus`, matching the existing interactive
-importer. Use `--corpus-name "..."` to choose another corpus. The job preserves
-title, abstract, authors, categories, dates, license and source URL. It embeds
-title + abstract with the configured model and dimensions. Unchanged embeddings
-are reused; metadata-only changes preserve the vector.
-
-`--workers` controls concurrent papers (default 2, maximum 32). Free workers take
-another paper as soon as results are collected, without waiting for a whole batch.
-Read-ahead is capped at four times the worker count beyond the checkpoint; a very
-slow early paper can temporarily pause refill to keep memory and replay bounded.
-DynamoDB requests retry transient failures with standard SDK backoff, up to eight
-attempts per request. Embedding requests are paced across all workers with
-`--embedding-rps 5` by default (an initial operating rate, not a detected AWS quota).
-On Bedrock throttling, all workers share a roughly 60-second cooldown and the rate
-halves for the rest of this invocation. Embedding calls have up to eight attempts;
-other supported transient service errors use exponential backoff with jitter.
-Permission and validation errors fail immediately. SDK retries are disabled for
-Bedrock so retries also obey the shared limiter. The limiter applies only to this
-process; other applications can consume the same account quota. Worker count and
-embedding rate can change when resuming without changing the checkpoint.
-Progress prints every approximately 100 records; the final output includes created,
-updated and unchanged counts, elapsed seconds, successful embedding calls and
-reported input tokens. Token counts cover the current invocation and are not an
-AWS billing report; ambiguous network failures or interrupted calls can still bill.
-
-A checkpoint next to the snapshot records the last consecutive successful record.
-It never advances past an unfinished or failed paper, even if later papers finish.
-Existing checkpoints from the batch importer remain compatible. Repeat
-the same command to resume. `--limit` applies to each invocation, so another limited
-run processes the next 10,000 papers. Records beyond the checkpoint may be replayed;
-papers already stored are detected and do not need re-embedding. An embedding that
-was generated but not stored may be charged again. Malformed records stop the run
-with a line number rather than being silently skipped. Dry runs always validate
-from the beginning and do not change progress.
-
-Keep the snapshot immutable during import. Checkpoints are bound to its path, size
-and modification time, the actual AWS table ARNs, corpus and embedding configuration.
-Use `--checkpoint ../data/another-progress.json` for a new snapshot or target. Do not
-run multiple import jobs against the same corpus concurrently. A checkpoint lock
-prevents concurrent use of the same progress file; after a hard process termination,
-remove its `.lock` file only once the old process has stopped.
-
-For a refreshed snapshot, use a new checkpoint and run it through the same corpus;
-unchanged records are skipped. Use snapshots in chronological order: the importer
-does not guard against an older snapshot replacing newer content. Automated daily
-OAI-PMH synchronization and removal of papers absent from a snapshot are not included.
+This project uses the [arXiv API](https://info.arxiv.org/help/api/index.html) to access research metadata. Research Agent is an independent project and is not affiliated with or endorsed by arXiv. Credit belongs to the researchers whose papers provide the underlying source material.
