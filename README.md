@@ -1,4 +1,4 @@
-﻿# Research Agent
+# Research Agent
 
 Research Agent helps users understand a collection of research without having to locate every relevant passage manually. Users can ask about a topic, compare approaches, or explore connections across papers and documents, then follow the citations back to the evidence behind an answer.
 
@@ -31,32 +31,6 @@ Under the hood, it uses retrieval-augmented generation (RAG): it finds relevant 
 | Answer generation | Amazon Nova 2 Lite via Bedrock | Synthesizes answers from retrieved evidence |
 | Infrastructure | AWS SAM | Defines the API, functions, authentication, and AWS permissions |
 
-```mermaid
-%%{init: {"flowchart": {"useMaxWidth": true, "nodeSpacing": 45, "rankSpacing": 65}, "themeVariables": {"fontSize": "16px"}}}%%
-flowchart LR
-    UI["React app<br/>Vercel"] -->|Sign in| Auth[Amazon Cognito]
-    UI -->|Question and access token| API["FastAPI on Lambda<br/>API Gateway"]
-    API -->|Question text| Titan["Amazon Bedrock<br/>Titan Text Embeddings V2"]
-    Titan -->|Question vector for semantic search| DB[("DynamoDB<br/>Stored text and vectors<br/>Cosine similarity search")]
-    DB -->|Relevant text excerpts| Nova["Amazon Bedrock<br/>Nova 2 Lite"]
-    API -->|Question and instructions| Nova
-    Nova -->|Generated answer| API
-    API -->|Validated answer and citations| UI
-
-    API -->|Authorize upload| UI
-    UI -->|Direct file upload| S3[(Private S3 storage)]
-    S3 -->|New file| Worker["Ingestion worker<br/>Extract and chunk text"]
-    Worker -->|Document chunks| Titan
-    Arxiv["arXiv ingestion<br/>Title and abstract"] -->|Paper text| Titan
-    Titan -->|Document vectors stored during ingestion| DB
-    Worker -->|Original chunk text| DB
-    Arxiv -->|Paper text and metadata| DB
-```
-
-The arrows show data flow: the backend coordinates the Bedrock calls and DynamoDB operations. Ingestion stores document text alongside Titan embeddings. At question time, a new question embedding finds similar stored vectors in the selected corpus. **Nova receives the matching text excerpts, not the vectors**, and the backend validates its citations before returning the answer to React.
-
-The diagram uses a horizontal layout with extra spacing. GitHub limits the width of the README content column; for a wider view, paste the Mermaid block into the [Mermaid Live Editor](https://mermaid.live/) and expand its preview.
-
 ### Why this structure
 
 The frontend handles interaction while the backend owns access checks, retrieval, and model calls. API Gateway validates Cognito tokens, and the API checks corpus ownership before accessing private data. AWS service credentials remain on the backend.
@@ -70,6 +44,21 @@ Embedding and generation are separate operations. Titan provides a common vector
 Document counts load separately from the corpus list so expensive counting does not block corpus selection or questions.
 
 ## How documents become searchable
+
+Both ingestion paths turn source text into embeddings and store the text alongside its vectors.
+
+```mermaid
+flowchart LR
+    Arxiv[arXiv API] --> Papers[Title and abstract]
+    UI[React app] -->|Authorized direct upload| S3[(Private S3 storage)]
+    S3 -->|New file| Worker["Ingestion worker<br/>Extract and chunk text"]
+    Papers --> Titan["Amazon Bedrock<br/>Titan Text Embeddings V2"]
+    Worker --> Titan
+    Titan -->|Document embeddings| Store[Ingestion service saves records]
+    Papers -->|Text and metadata| Store
+    Worker -->|Text and document identity| Store
+    Store --> DB[(DynamoDB)]
+```
 
 ### arXiv papers
 
@@ -90,6 +79,21 @@ This path indexes abstracts rather than full paper PDFs. Questions in the web ap
 PDF extraction uses `pypdf`; scanned PDFs need OCR before upload. TXT and Markdown files must contain UTF-8 text. Retrieval excludes uploaded chunks whose upload record is missing or not ready.
 
 ## How an answer is produced
+
+The backend coordinates the following flow for a semantic-search question. Both arXiv papers and uploaded documents use this same answering path.
+
+```mermaid
+flowchart LR
+    UI[React app] -->|Question and access token| API["FastAPI on Lambda<br/>Check corpus access"]
+    API --> Titan["Amazon Bedrock<br/>Titan Text Embeddings V2"]
+    Titan -->|Question vector| Search["DynamoDB<br/>Cosine semantic search"]
+    Search -->|Matching text excerpts| Context["Backend assembles question,<br/>evidence and instructions"]
+    Context --> Nova["Amazon Bedrock<br/>Nova 2 Lite"]
+    Nova -->|Generated answer| Validate[Backend validates citations]
+    Validate -->|Answer and sources| UI
+```
+
+Titan embeddings locate relevant documents; **Nova receives their text excerpts, not their vectors**. The arrows represent the data flow managed by the backend, rather than direct calls between AWS services.
 
 1. **Check access.** The API verifies that the selected corpus is shared or belongs to the signed-in user.
 2. **Embed the question.** Titan converts the question into a vector using the same configured embedding model as the stored text.
