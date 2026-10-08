@@ -36,6 +36,7 @@ def retrieve_similar_chunks(
             external_id=document.external_id,
             title=document.title,
             content=document.content,
+            abstract=document.abstract,
             source_url=document.source_url,
             distance=score,
         )

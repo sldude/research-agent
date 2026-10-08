@@ -202,6 +202,30 @@ class DynamoRepositoryTests(unittest.TestCase):
             DynamoRepository(client).delete_document(corpus_id="c", document_id="upload")
         client.delete_item.assert_not_called()
 
+    @patch("app.database.repository.time.sleep")
+    def test_corpus_cleanup_retries_before_removing_metadata(self, sleep):
+        client = Mock()
+        client.query.side_effect = [
+            {"Items": [{"corpus_id": {"S": "c"}, "chunk_id": {"S": "chunk"}}]},
+            {"Items": []},
+        ]
+        pending = {"chunks": [{"DeleteRequest": {"Key": {"chunk_id": {"S": "chunk"}}}}]}
+        client.batch_write_item.side_effect = [{"UnprocessedItems": pending}, {}]
+        DynamoRepository(client).delete_corpus("c")
+        self.assertEqual(pending, client.batch_write_item.call_args.kwargs["RequestItems"])
+        client.delete_item.assert_called_once()
+
+    @patch("app.database.repository.time.sleep")
+    def test_corpus_cleanup_failure_preserves_metadata_for_retry(self, sleep):
+        client = Mock()
+        client.query.return_value = {"Items": [
+            {"corpus_id": {"S": "c"}, "chunk_id": {"S": "chunk"}}
+        ]}
+        client.batch_write_item.return_value = {"UnprocessedItems": {"chunks": [{}]}}
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            DynamoRepository(client).delete_corpus("c")
+        client.delete_item.assert_not_called()
+
     def test_search_excludes_deleted_and_unfinished_uploads(self):
         from types import SimpleNamespace
         repository = DynamoRepository(Mock())

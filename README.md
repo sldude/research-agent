@@ -8,6 +8,8 @@ Under the hood, it uses retrieval-augmented generation (RAG): it finds relevant 
 
 **[Try the app on Vercel](https://research-agent-iota.vercel.app/)** — create an account or sign in to get started.
 
+Read the [Privacy policy](https://research-agent-iota.vercel.app/privacy-policy/index.html) for how account information, uploaded documents, and questions are handled, including retention and deletion requests. Research Agent does not store chat history; diagnostic logging is described separately in the policy.
+
 ## What you can do
 
 - Ask about findings, methods, and connections within a selected corpus.
@@ -184,6 +186,7 @@ The response contains `question`, `answer`, and `sources`. Each source includes 
 | [frontend/src/main.tsx](frontend/src/main.tsx) | React entry point and Cognito configuration through Amplify |
 | [frontend/src/uploadDocument.ts](frontend/src/uploadDocument.ts) | Upload authorization and direct transfer to S3 |
 | [frontend/src/App.css](frontend/src/App.css) | Application layout and styling |
+| [frontend/public/privacy-policy/](frontend/public/privacy-policy/) | Public privacy policy page and stylesheet, available without signing in |
 | [backend/app/main.py](backend/app/main.py) | FastAPI routes, ownership checks, previews, and deletion |
 | [backend/app/schemas/](backend/app/schemas/) | Pydantic validation at API and model-output boundaries |
 | [backend/app/clients/](backend/app/clients/) | arXiv HTTP client and Bedrock embedding/generation clients |

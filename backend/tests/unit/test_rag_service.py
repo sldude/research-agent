@@ -28,6 +28,15 @@ def generated(answer, count=None, additional=None):
 
 
 class RagTests(unittest.TestCase):
+    def test_references_preserve_ingested_abstract_and_paper_link(self):
+        evidence = chunk("paper")
+        evidence.abstract = "Complete stored abstract, rather than the retrieved excerpt."
+        evidence.source_url = "https://arxiv.org/abs/2401.12345"
+        result = resolve_references(generated("Finding [1]"), create_rag_sources([evidence]), "Question")
+        self.assertEqual(evidence.abstract, result.sources[0].abstract)
+        self.assertEqual(evidence.source_url, result.sources[0].source_url)
+        self.assertIsNone(create_rag_sources([chunk("upload")])[0].abstract)
+
     def test_five_chunks_of_one_document_have_one_reference(self):
         chunks = [chunk("one", i) for i in range(5)]
         self.assertEqual([1], [s.number for s in create_rag_sources(chunks)])

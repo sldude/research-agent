@@ -187,6 +187,7 @@ def create_rag_sources(chunks: list[RetrievedChunk]) -> list[RagSource]:
             title=chunk.title,
             source_url=chunk.source_url,
             distance=chunk.distance,
+            abstract=chunk.abstract,
         ))
     return sources
 
@@ -283,7 +284,7 @@ def answer_question(
             chunk_id=record.chunk_id, document_id=record.id,
             external_id=record.external_id, title=record.title,
             content=(record.abstract or record.content)[:1600],
-            source_url=record.source_url, distance=None,
+            source_url=record.source_url, distance=None, abstract=record.abstract,
         ) for record in records]
     else:
         chunks = retrieve_similar_chunks(

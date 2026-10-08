@@ -47,6 +47,7 @@ class ArxivSearchResponse(BaseModel):
 
 # schema for chunk similarity ranking retrieval
 class RetrievedChunk(BaseModel):
+    abstract: str | None = None
     chunk_id: str
     document_id: str
     external_id: str | None
@@ -59,6 +60,7 @@ class RagSource(BaseModel):
     """One database-backed source supplied to the generation model to answer post similarity retrieval."""
 
     number: int = Field(strict=True, gt=0)
+    abstract: str | None = None
     document_id: str
     external_id: str | None
     title: str

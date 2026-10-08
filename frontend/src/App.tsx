@@ -65,11 +65,12 @@ type DocumentPreview = {
   isPdf: boolean
 }
 
-type OpenPreview = DocumentPreview & { name: string; revokeOnClose?: boolean }
+type OpenPreview = DocumentPreview & { name: string; revokeOnClose?: boolean; paperUrl?: string; isAbstract?: boolean }
 
 type RagSource = {
   number: number
   reference_type: 'cited' | 'additional'
+  abstract?: string | null
   document_id: string
   external_id: string | null
   title: string
@@ -191,6 +192,24 @@ function App() {
   const [uploadTracking, setUploadTracking] = useState<UploadTracking | null>(null)
   const [openPreview, setOpenPreview] = useState<OpenPreview | null>(null)
   const [previewLoadingId, setPreviewLoadingId] = useState('')
+  const [citationPreviewMessage, setCitationPreviewMessage] = useState('')
+  const previewRequest = useRef<AbortController | null>(null)
+  useEffect(() => {
+    return () => previewRequest.current?.abort()
+  }, [signedInUser, selectedCorpusId, ragAnswer])
+  useEffect(() => {
+    return () => {
+      if (openPreview?.revokeOnClose) URL.revokeObjectURL(openPreview.url)
+    }
+  }, [openPreview])
+  useEffect(() => {
+    if (!openPreview) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenPreview(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [openPreview])
   const [deletingDocumentId, setDeletingDocumentId] = useState('')
   const [pendingDeletionIds, setPendingDeletionIds] = useState<string[]>([])
   const [deletingCorpusId, setDeletingCorpusId] = useState('')
@@ -895,37 +914,76 @@ function App() {
     }
   }
 
-  async function handleOpenStoredDocument(document: UploadedDocument) {
+  async function handleOpenStoredDocument(
+    document: Pick<UploadedDocument, 'document_id' | 'filename'>,
+    corpusId = documentCorpusId,
+    fromCitation = false,
+  ) {
     const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
-    if (!apiUrl || !documentCorpusId) return
+    if (!apiUrl || !corpusId) return
+    previewRequest.current?.abort()
+    const controller = new AbortController()
+    previewRequest.current = controller
     setPreviewLoadingId(document.document_id)
+    setCitationPreviewMessage('')
     try {
       const session = await fetchAuthSession()
       const token = session.tokens?.accessToken.toString()
       if (!token) throw new Error('Sign in to preview this document.')
       const response = await fetch(
-        `${apiUrl}/api/corpora/${encodeURIComponent(documentCorpusId)}/documents/${encodeURIComponent(document.document_id)}/content`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        `${apiUrl}/api/corpora/${encodeURIComponent(corpusId)}/documents/${encodeURIComponent(document.document_id)}/content`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal },
       )
-      if (!response.ok) throw new Error(`Could not load preview (${response.status}).`)
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(typeof body?.detail === 'string' ? body.detail : `Could not load preview (${response.status}).`)
+      }
       const blob = await response.blob()
-      const isPdf = document.filename.toLowerCase().endsWith('.pdf')
+      const isPdf = blob.type === 'application/pdf' || document.filename.toLowerCase().endsWith('.pdf')
+      const text = isPdf ? null : await blob.text()
+      if (controller.signal.aborted) return
       setOpenPreview({
         name: document.filename,
         isPdf,
         url: URL.createObjectURL(blob),
-        text: isPdf ? null : await blob.text(),
+        text,
         revokeOnClose: true,
       })
     } catch (error) {
-      setDocumentsMessage(error instanceof Error ? error.message : 'Could not load preview.')
+      if (!controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : 'Could not load preview.'
+        if (fromCitation) setCitationPreviewMessage(message)
+        else setDocumentsMessage(message)
+      }
     } finally {
-      setPreviewLoadingId('')
+      if (previewRequest.current === controller) setPreviewLoadingId('')
     }
   }
 
+  function handleOpenCitation(source: RagSource) {
+    if (selectedCorpus?.corpus_type === 'user_upload' && source.external_id) {
+      void handleOpenStoredDocument({ document_id: source.external_id, filename: source.title }, selectedCorpusId, true)
+      return
+    }
+    previewRequest.current?.abort()
+    setPreviewLoadingId('')
+    setCitationPreviewMessage('')
+    let paperUrl: string | undefined
+    try {
+      const url = new URL(source.source_url ?? '')
+      if (['arxiv.org', 'www.arxiv.org'].includes(url.hostname) && ['https:', 'http:'].includes(url.protocol)) {
+        url.protocol = 'https:'
+        paperUrl = url.href
+      }
+    } catch { /* Missing paper links do not prevent abstract previews. */ }
+    setOpenPreview({
+      name: source.title, isPdf: false, url: '', isAbstract: true, paperUrl,
+      text: source.abstract || 'The ingested abstract is unavailable for this source.',
+    })
+  }
+
   function closePreview() {
-    if (openPreview?.revokeOnClose) URL.revokeObjectURL(openPreview.url)
+    previewRequest.current?.abort()
     setOpenPreview(null)
   }
 
@@ -1365,7 +1423,14 @@ function App() {
       {signedInUser && activeTab === 'ask' && ragAnswer && (
         <section className="answer-card">
           <h2>Answer</h2>
-          <p className="answer-text">{ragAnswer.answer}</p>
+          <p className="answer-text">{ragAnswer.answer.split(/(\[[1-9][0-9]*\])/g).map((part, index) => {
+            const source = /^\[[1-9][0-9]*\]$/.test(part)
+              ? ragAnswer.sources.find((item) => item.number === Number(part.slice(1, -1))) : undefined
+            return source ? <button type="button" className="citation-link" key={index}
+              aria-label={`Preview source ${source.number}: ${source.title}`}
+              onClick={() => handleOpenCitation(source)}>{part}</button> : part
+          })}</p>
+          {citationPreviewMessage && <p role="alert">{citationPreviewMessage}</p>}
 
           {(['cited', 'additional'] as const).map((referenceType) => {
             const sources = ragAnswer.sources.filter((source) =>
@@ -1377,13 +1442,9 @@ function App() {
                 <ol>
                   {sources.map((source) => (
                     <li value={source.number} key={`${source.number}-${source.document_id}`}>
-                      {source.source_url ? (
-                        <a href={source.source_url} target="_blank" rel="noreferrer">
-                          {source.title}
-                        </a>
-                      ) : (
-                        source.title
-                      )}
+                      <button type="button" className="citation-link" onClick={() => handleOpenCitation(source)}>
+                        {source.title}{previewLoadingId === source.external_id ? ' — Opening…' : ''}
+                      </button>
                       <span>Distance: {source.distance === null ? 'Overview' : source.distance.toFixed(4)}</span>
                     </li>
                   ))}
@@ -1395,9 +1456,10 @@ function App() {
       )}
       {openPreview && <div className="preview-backdrop" role="presentation" onMouseDown={closePreview}>
         <section className="preview-modal" role="dialog" aria-modal="true" aria-label={`Preview ${openPreview.name}`} onMouseDown={(event) => event.stopPropagation()}>
-          <header><h2>{openPreview.name}</h2><button type="button" aria-label="Close preview" onClick={closePreview}>×</button></header>
+          <header><h2>{openPreview.name}</h2>{openPreview.paperUrl && <a href={openPreview.paperUrl} target="_blank" rel="noopener noreferrer">Open paper on arXiv</a>}{openPreview.url && <a href={openPreview.url} target="_blank" rel="noopener noreferrer">Open document in new tab</a>}<button autoFocus type="button" aria-label="Close preview" onClick={closePreview}>×</button></header>
           {openPreview.isPdf
             ? <iframe title={openPreview.name} src={openPreview.url} />
+            : openPreview.isAbstract ? <div className="abstract-preview"><h3>Ingested abstract</h3><p>{openPreview.text}</p></div>
             : <pre className="text-preview">{openPreview.text}</pre>}
         </section>
       </div>}

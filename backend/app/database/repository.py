@@ -115,7 +115,7 @@ class DynamoRepository:
 
     def list_corpora(self) -> list[CorpusRecord]:
         items: list[dict[str, Any]] = []
-        request: dict[str, Any] = {"TableName": DYNAMODB_CORPORA_TABLE}
+        request: dict[str, Any] = {"TableName": DYNAMODB_CORPORA_TABLE, "ConsistentRead": True}
         while True:
             response = self.client.scan(**request)
             items.extend(response.get("Items", []))
@@ -445,6 +445,7 @@ class DynamoRepository:
             "ExpressionAttributeNames": {"#corpus_id": "corpus_id"},
             "ExpressionAttributeValues": {":corpus_id": _string(corpus_id)},
             "ProjectionExpression": "corpus_id, chunk_id",
+            "ConsistentRead": True,
         }
         while True:
             response = self.client.query(**query)
@@ -464,9 +465,15 @@ class DynamoRepository:
                 break
             query["ExclusiveStartKey"] = last_key
         for start in range(0, len(requests), 25):
-            self.client.batch_write_item(
-                RequestItems={DYNAMODB_CHUNKS_TABLE: requests[start : start + 25]}
-            )
+            pending = {DYNAMODB_CHUNKS_TABLE: requests[start : start + 25]}
+            for attempt in range(6):
+                result = self.client.batch_write_item(RequestItems=pending)
+                pending = {table: items for table, items in result.get("UnprocessedItems", {}).items() if items}
+                if not pending:
+                    break
+                if attempt == 5:
+                    raise RuntimeError("Corpus deletion incomplete; retry corpus deletion.")
+                time.sleep(min(0.1 * 2 ** attempt, 2))
 
         for document in self.list_document_statuses(corpus_id):
             self.client.delete_item(
@@ -787,6 +794,7 @@ class DynamoRepository:
             "TableName": DYNAMODB_DOCUMENT_STATUS_TABLE,
             "KeyConditionExpression": "corpus_id = :corpus_id",
             "ExpressionAttributeValues": {":corpus_id": _string(corpus_id)},
+            "ConsistentRead": True,
         }
 
         while True:
