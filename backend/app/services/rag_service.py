@@ -257,6 +257,9 @@ where needed, then connect to cited evidence. Respect requests for corpus-only
 answers. Cite only sentences the sources actually support. Use the system's
 insufficient-evidence fallback when neither supported evidence nor the permitted
 introductory-background exception provides an answer.
+When mathematical notation is useful, use $...$ for inline LaTeX math and
+$$...$$ for display math. Keep citation markers outside math delimiters.
+Escape LaTeX backslashes correctly in the JSON string.
 Return the complete JSON object required by the system, not bare prose. Keep
 the answer concise enough to finish the object within the output budget.
 """.strip()

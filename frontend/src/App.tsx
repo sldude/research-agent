@@ -12,6 +12,7 @@ import {
   signUp,
 } from 'aws-amplify/auth'
 import './App.css'
+import { FormattedText } from './FormattedText'
 import { MAX_UPLOAD_BYTES, uploadDocument } from './uploadDocument'
 import { deleteAccount } from './deleteAccount'
 
@@ -1423,13 +1424,12 @@ function App() {
       {signedInUser && activeTab === 'ask' && ragAnswer && (
         <section className="answer-card">
           <h2>Answer</h2>
-          <p className="answer-text">{ragAnswer.answer.split(/(\[[1-9][0-9]*\])/g).map((part, index) => {
-            const source = /^\[[1-9][0-9]*\]$/.test(part)
-              ? ragAnswer.sources.find((item) => item.number === Number(part.slice(1, -1))) : undefined
-            return source ? <button type="button" className="citation-link" key={index}
+          <div className="answer-text"><FormattedText text={ragAnswer.answer} renderCitation={(number, key) => {
+            const source = ragAnswer.sources.find((item) => item.number === number)
+            return source ? <button type="button" className="citation-link" key={key}
               aria-label={`Preview source ${source.number}: ${source.title}`}
-              onClick={() => handleOpenCitation(source)}>{part}</button> : part
-          })}</p>
+              onClick={() => handleOpenCitation(source)}>[{number}]</button> : `[${number}]`
+          }} /></div>
           {citationPreviewMessage && <p role="alert">{citationPreviewMessage}</p>}
 
           {(['cited', 'additional'] as const).map((referenceType) => {
@@ -1459,7 +1459,7 @@ function App() {
           <header><h2>{openPreview.name}</h2>{openPreview.paperUrl && <a href={openPreview.paperUrl} target="_blank" rel="noopener noreferrer">Open paper on arXiv</a>}{openPreview.url && <a href={openPreview.url} target="_blank" rel="noopener noreferrer">Open document in new tab</a>}<button autoFocus type="button" aria-label="Close preview" onClick={closePreview}>×</button></header>
           {openPreview.isPdf
             ? <iframe title={openPreview.name} src={openPreview.url} />
-            : openPreview.isAbstract ? <div className="abstract-preview"><h3>Ingested abstract</h3><p>{openPreview.text}</p></div>
+            : openPreview.isAbstract ? <div className="abstract-preview"><h3>Ingested abstract</h3><div className="abstract-text"><FormattedText text={openPreview.text ?? ''} /></div></div>
             : <pre className="text-preview">{openPreview.text}</pre>}
         </section>
       </div>}

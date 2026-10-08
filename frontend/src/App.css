@@ -125,16 +125,22 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .undo-deletion { position: absolute; z-index: 2; top: 7px; right: 7px; padding: 4px 8px; border: 1px solid #d99aa2; border-radius: 999px; background: white; color: #9a2834; font-size: .7rem; font-weight: 700; }
 .undo-deletion:hover { background: #feecee; }
 .preview-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 24px; background: #071127b8; }
-.preview-modal { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(900px, 100%); height: min(820px, 92vh); overflow: hidden; border-radius: 16px; background: white; box-shadow: 0 30px 90px #0006; }
+.preview-modal { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); min-width: 0; max-width: 100%; width: min(900px, 100%); height: min(820px, 92vh); overflow: hidden; border-radius: 16px; background: white; box-shadow: 0 30px 90px #0006; }
 .preview-modal header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .preview-modal header h2 { overflow: hidden; margin: 0; font-size: 1rem; text-overflow: ellipsis; white-space: nowrap; }
 .preview-modal header button { border: 0; background: transparent; color: var(--text-h); font-size: 1.7rem; }
 .preview-modal iframe { width: 100%; height: 100%; border: 0; }
 .text-preview { overflow: auto; margin: 0; padding: 28px; background: #f8fafc; color: var(--text-h); font: .9rem/1.6 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
-.abstract-preview { overflow: auto; padding: 28px; line-height: 1.7; }
+.abstract-preview { min-width: 0; overflow: auto; padding: 28px; line-height: 1.7; overflow-wrap: anywhere; }
 .abstract-preview h3 { margin-top: 0; }
 .abstract-preview p { white-space: pre-wrap; }
 .answer-text { white-space: pre-wrap; }
+.abstract-text { white-space: pre-wrap; }
+.answer-text .katex-display, .abstract-text .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; white-space: normal; }
+/* Centering an oversized equation can put its left edge outside the scroll area. */
+.answer-text .katex-display > .katex, .abstract-text .katex-display > .katex { text-align: left; }
+.abstract-text > span { overflow-wrap: normal; }
+.abstract-text > span:has(> .katex:not(.katex-display)) { display: inline-block; max-width: 100%; overflow-x: auto; overflow-y: hidden; vertical-align: middle; }
 .citation-link { display: inline; padding: 0; border: 0; background: transparent; color: var(--accent, #2563eb); font: inherit; text-align: left; text-decoration: underline; cursor: pointer; }
 .citation-link:hover { text-decoration-thickness: 2px; }
 .citation-link:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
